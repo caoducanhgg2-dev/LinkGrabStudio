@@ -24,7 +24,6 @@ CloseApplications=yes
 RestartApplications=no
 
 [Languages]
-Name: "vietnamese"; MessagesFile: "compiler:Languages\Vietnamese.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
@@ -39,4 +38,3 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Mở {#MyAppName}"; Flags: nowait postinstall skipifsilent
-
