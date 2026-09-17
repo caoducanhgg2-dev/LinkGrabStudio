@@ -37,8 +37,15 @@ jobs:
       - name: Create checksums
         shell: powershell
         run: |
-          Get-FileHash .\dist\installer\*.exe -Algorithm SHA256 | Format-Table -HideTableHeaders Hash,Path | Out-File .\dist\SHA256SUMS.txt
-          Get-FileHash .\dist\*.zip -Algorithm SHA256 | Format-Table -HideTableHeaders Hash,Path | Out-File .\dist\SHA256SUMS.txt -Append
+          $files = @(
+            Get-ChildItem .\dist\installer\*.exe
+            Get-ChildItem .\dist\*.zip
+          )
+          $lines = $files | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          Set-Content -Path .\dist\SHA256SUMS.txt -Value $lines -Encoding ascii
 
       - uses: actions/upload-artifact@v4
         with:
