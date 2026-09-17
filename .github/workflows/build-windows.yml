@@ -3,6 +3,8 @@ name: Build Windows Installer
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "main"
     tags:
       - "v*"
 
@@ -46,4 +48,3 @@ jobs:
             dist/*.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
-
