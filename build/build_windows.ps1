@@ -24,8 +24,8 @@ python -m PyInstaller `
     --distpath "dist" `
     --workpath "build\pyinstaller" `
     --specpath "build\pyinstaller" `
-    --add-data "tools;tools" `
-    --collect-all PySide6 `
+    --add-data "$ProjectRoot\tools;tools" `
+    --paths "$ProjectRoot" `
     "run_app.py"
 
 $AppExe = Join-Path $ProjectRoot "dist\LinkGrabStudio\LinkGrabStudio.exe"
@@ -46,4 +46,3 @@ if ($Iscc) {
 } else {
     Write-Warning "Inno Setup 6 not found. Portable build is still available."
 }
-
