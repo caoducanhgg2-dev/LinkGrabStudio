@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+tools/
+dist/
+build/temp-tools/
+build/pyinstaller/
+build/smoke-data*/
+build/linkgrab-preview.png
+LinkGrabStudio_Source_*.zip
+LinkGrabStudio_Source_*.sha256

@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+from collections import deque
+from uuid import uuid4
+
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+
+from .database import HistoryDatabase
+from .downloader import DownloaderEngine, DownloaderError
+from .models import DownloadJob, DownloadOptions, DownloadStatus, VideoInfo
+from .updater import EngineUpdater
+
+
+class PreviewSignals(QObject):
+    item = Signal(object)
+    error = Signal(str, str)
+    finished = Signal()
+
+
+class PreviewWorker(QRunnable):
+    def __init__(self, engine: DownloaderEngine, urls: list[str], playlist: bool, cookies_file) -> None:
+        super().__init__()
+        self.engine = engine
+        self.urls = urls
+        self.playlist = playlist
+        self.cookies_file = cookies_file
+        self.signals = PreviewSignals()
+
+    @Slot()
+    def run(self) -> None:
+        for url in self.urls:
+            try:
+                for video in self.engine.preview([url], playlist=self.playlist, cookies_file=self.cookies_file):
+                    self.signals.item.emit(video)
+            except DownloaderError as exc:
+                self.signals.error.emit(url, str(exc))
+            except Exception as exc:  # keep one failed link from stopping the batch
+                self.signals.error.emit(url, f"Lỗi không mong đợi: {exc}")
+        self.signals.finished.emit()
+
+
+class DownloadSignals(QObject):
+    started = Signal(object)
+    progress = Signal(str, float, str, str)
+    log = Signal(str, str)
+    finished = Signal(object)
+
+
+class DownloadWorker(QRunnable):
+    def __init__(self, engine: DownloaderEngine, database: HistoryDatabase, job: DownloadJob) -> None:
+        super().__init__()
+        self.engine = engine
+        self.database = database
+        self.job = job
+        self.signals = DownloadSignals()
+
+    @Slot()
+    def run(self) -> None:
+        self.job.status = DownloadStatus.PREPARING
+        self.signals.started.emit(self.job)
+        try:
+            result = self.engine.download(
+                self.job,
+                on_progress=lambda p, s, e: self.signals.progress.emit(self.job.job_id, p, s, e),
+                on_log=lambda line: self.signals.log.emit(self.job.job_id, line),
+            )
+        except DownloaderError as exc:
+            self.job.status = DownloadStatus.FAILED
+            self.job.error = str(exc)
+            result = self.job
+        except Exception as exc:
+            self.job.status = DownloadStatus.FAILED
+            self.job.error = f"Lỗi không mong đợi: {exc}"
+            result = self.job
+        self.database.record_job(result)
+        self.signals.finished.emit(result)
+
+
+class QueueController(QObject):
+    job_added = Signal(object)
+    job_started = Signal(object)
+    job_progress = Signal(str, float, str, str)
+    job_log = Signal(str, str)
+    job_finished = Signal(object)
+    queue_counts = Signal(int, int, int, int)
+
+    def __init__(self, engine: DownloaderEngine, database: HistoryDatabase, concurrency: int = 2) -> None:
+        super().__init__()
+        self.engine = engine
+        self.database = database
+        self.pool = QThreadPool(self)
+        self.pool.setMaxThreadCount(max(1, min(4, concurrency)))
+        self.pending: deque[DownloadJob] = deque()
+        self.jobs: dict[str, DownloadJob] = {}
+        self.running: set[str] = set()
+        self.done = 0
+        self.failed = 0
+
+    def set_concurrency(self, value: int) -> None:
+        self.pool.setMaxThreadCount(max(1, min(4, value)))
+        self._pump()
+
+    def add_videos(
+        self,
+        videos: list[VideoInfo],
+        options: DownloadOptions,
+        *,
+        skip_duplicates: bool = True,
+    ) -> tuple[int, int]:
+        completed_keys = self.database.completed_keys(videos) if skip_duplicates else set()
+        active_keys = {job.video.unique_key for job in self.jobs.values() if job.status not in {DownloadStatus.FAILED, DownloadStatus.CANCELLED}}
+        added = skipped = 0
+        for video in videos:
+            if video.unique_key in completed_keys or video.unique_key in active_keys:
+                skipped += 1
+                continue
+            job = DownloadJob(job_id=uuid4().hex, video=video, options=options)
+            self.jobs[job.job_id] = job
+            self.pending.append(job)
+            active_keys.add(video.unique_key)
+            added += 1
+            self.job_added.emit(job)
+        self._emit_counts()
+        self._pump()
+        return added, skipped
+
+    def cancel_all(self) -> None:
+        self.engine.cancel_all()
+        while self.pending:
+            job = self.pending.popleft()
+            job.status = DownloadStatus.CANCELLED
+            self.database.record_job(job)
+            self.job_finished.emit(job)
+        self._emit_counts()
+
+    def _pump(self) -> None:
+        while self.pending and len(self.running) < self.pool.maxThreadCount():
+            job = self.pending.popleft()
+            self.running.add(job.job_id)
+            worker = DownloadWorker(self.engine, self.database, job)
+            worker.signals.started.connect(self.job_started)
+            worker.signals.progress.connect(self.job_progress)
+            worker.signals.log.connect(self.job_log)
+            worker.signals.finished.connect(self._on_finished)
+            self.pool.start(worker)
+        self._emit_counts()
+
+    @Slot(object)
+    def _on_finished(self, job: DownloadJob) -> None:
+        self.running.discard(job.job_id)
+        if job.status == DownloadStatus.COMPLETED:
+            self.done += 1
+        elif job.status == DownloadStatus.FAILED:
+            self.failed += 1
+        self.job_finished.emit(job)
+        self._emit_counts()
+        self._pump()
+
+    def _emit_counts(self) -> None:
+        self.queue_counts.emit(len(self.running), len(self.pending), self.done, self.failed)
+
+
+class UpdateSignals(QObject):
+    status = Signal(str)
+    finished = Signal(str)
+    error = Signal(str)
+
+
+class EngineUpdateWorker(QRunnable):
+    def __init__(self, updater: EngineUpdater) -> None:
+        super().__init__()
+        self.updater = updater
+        self.signals = UpdateSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            version = self.updater.update(on_status=self.signals.status.emit)
+            self.signals.finished.emit(version)
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
