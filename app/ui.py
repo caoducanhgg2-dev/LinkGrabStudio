@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 from .config import APP_NAME, AppSettings, app_data_dir
 from .database import HistoryDatabase
 from .downloader import DownloaderEngine
-from .models import DownloadJob, DownloadOptions, DownloadStatus, VideoInfo
+from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions, VideoInfo
 from .styles import APP_STYLE
 from .updater import EngineUpdater
 from .utils import detect_platform, extract_urls, format_duration
@@ -53,7 +53,7 @@ def open_path(path: Path) -> None:
 
 
 class DownloadPage(QWidget):
-    preview_requested = Signal(list, bool, bool)
+    preview_requested = Signal(list, object, bool)
     queue_requested = Signal(list)
     stop_requested = Signal()
 
@@ -120,14 +120,20 @@ class DownloadPage(QWidget):
             self.mode_group.addButton(button)
             mode_row.addWidget(button)
         self.link_mode.setChecked(True)
-        channel_button = QPushButton("👤 Theo kênh (bản 1.1)")
-        channel_button.setObjectName("mode")
-        channel_button.setEnabled(False)
-        mode_row.addWidget(channel_button)
+        self.channel_mode = QPushButton("👤 Theo kênh")
+        self.channel_mode.setObjectName("mode")
+        self.channel_mode.setCheckable(True)
+        self.mode_group.addButton(self.channel_mode)
+        mode_row.addWidget(self.channel_mode)
         mode_row.addStretch()
         form.addLayout(mode_row)
 
-        form.addWidget(QLabel("Link video — mỗi dòng một link"))
+        self.link_mode.clicked.connect(self._update_mode_ui)
+        self.playlist_mode.clicked.connect(self._update_mode_ui)
+        self.channel_mode.clicked.connect(self._update_mode_ui)
+
+        self.url_label = QLabel("Link video — mỗi dòng một link")
+        form.addWidget(self.url_label)
         self.url_input = QPlainTextEdit()
         self.url_input.setPlaceholderText(
             "Dán link vào đây. Ví dụ:\n"
@@ -140,6 +146,39 @@ class DownloadPage(QWidget):
         self.link_summary = QLabel("Chưa có link")
         self.link_summary.setObjectName("muted")
         form.addWidget(self.link_summary)
+
+        self.channel_filters = QFrame()
+        channel_grid = QGridLayout(self.channel_filters)
+        channel_grid.setContentsMargins(0, 6, 0, 6)
+        channel_grid.addWidget(QLabel("Số video"), 0, 0)
+        channel_grid.addWidget(QLabel("Sắp xếp"), 0, 1)
+        channel_grid.addWidget(QLabel("Khoảng thời gian"), 0, 2)
+        self.channel_limit = QSpinBox()
+        self.channel_limit.setRange(1, 300)
+        self.channel_limit.setValue(100)
+        self.channel_sort = QComboBox()
+        self.channel_sort.addItem("Nhiều lượt xem nhất", "views")
+        self.channel_sort.addItem("Mới nhất", "newest")
+        self.channel_period = QComboBox()
+        for label, days in (
+            ("Trong 1 tuần", 7),
+            ("Trong 1 tháng", 30),
+            ("Trong 3 tháng", 90),
+            ("Trong 6 tháng", 180),
+            ("Trong 1 năm", 365),
+        ):
+            self.channel_period.addItem(label, days)
+        self.channel_period.setCurrentIndex(4)
+        channel_grid.addWidget(self.channel_limit, 1, 0)
+        channel_grid.addWidget(self.channel_sort, 1, 1)
+        channel_grid.addWidget(self.channel_period, 1, 2)
+        self.channel_duplicate_note = QLabel(
+            "Video đã tải sẽ được bỏ chọn và hiển thị ngày tải cùng link nguồn."
+        )
+        self.channel_duplicate_note.setObjectName("muted")
+        channel_grid.addWidget(self.channel_duplicate_note, 2, 0, 1, 3)
+        self.channel_filters.setVisible(False)
+        form.addWidget(self.channel_filters)
 
         filters = QGridLayout()
         filters.addWidget(QLabel("Chất lượng"), 0, 0)
@@ -203,8 +242,10 @@ class DownloadPage(QWidget):
         preview_header.addStretch()
         root.addLayout(preview_header)
 
-        self.preview_table = QTableWidget(0, 6)
-        self.preview_table.setHorizontalHeaderLabels(["Chọn", "Nền tảng", "Tiêu đề", "Kênh", "Thời lượng", "Trạng thái"])
+        self.preview_table = QTableWidget(0, 9)
+        self.preview_table.setHorizontalHeaderLabels(
+            ["Chọn", "Nền tảng", "Tiêu đề", "Kênh", "Lượt xem", "Ngày đăng", "Thời lượng", "Link", "Trạng thái"]
+        )
         self.preview_table.setAlternatingRowColors(True)
         self.preview_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.preview_table.verticalHeader().setVisible(False)
@@ -213,8 +254,9 @@ class DownloadPage(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        for column in (4, 5, 6, 8):
+            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.Stretch)
         root.addWidget(self.preview_table, 1)
 
         self.log_box = QPlainTextEdit()
@@ -239,6 +281,18 @@ class DownloadPage(QWidget):
             cookies_file=cookies,
         )
 
+    def current_preview_options(self) -> PreviewOptions:
+        limit = self.channel_limit.value()
+        return PreviewOptions(
+            playlist=self.playlist_mode.isChecked(),
+            channel=self.channel_mode.isChecked(),
+            channel_limit=limit,
+            channel_scan_limit=max(100, min(500, limit * 5)),
+            sort_by=str(self.channel_sort.currentData()),
+            since_days=int(self.channel_period.currentData()),
+            skip_duplicates=self.settings.skip_duplicates,
+        )
+
     def selected_videos(self) -> list[VideoInfo]:
         selected: list[VideoInfo] = []
         for row, video in enumerate(self.videos):
@@ -252,18 +306,47 @@ class DownloadPage(QWidget):
         self.preview_table.setRowCount(0)
         self.preview_count.setText("0 video")
 
-    def add_preview_video(self, video: VideoInfo) -> None:
+    def add_preview_video(self, video: VideoInfo, duplicate: dict[str, str] | None = None) -> None:
         row = self.preview_table.rowCount()
         self.preview_table.insertRow(row)
         select_item = QTableWidgetItem()
-        select_item.setCheckState(Qt.Checked)
+        select_item.setCheckState(Qt.Unchecked if duplicate else Qt.Checked)
         select_item.setTextAlignment(Qt.AlignCenter)
         self.preview_table.setItem(row, 0, select_item)
-        values = [video.platform, video.title, video.uploader or "—", format_duration(video.duration), "Sẵn sàng"]
+        views = f"{video.view_count:,}".replace(",", ".") if video.view_count is not None else "—"
+        upload_date = video.upload_date
+        if len(upload_date) == 8 and upload_date.isdigit():
+            upload_date = f"{upload_date[6:8]}/{upload_date[4:6]}/{upload_date[:4]}"
+        elif not upload_date and video.raw.get("timestamp"):
+            try:
+                upload_date = datetime.fromtimestamp(int(video.raw["timestamp"])).strftime("%d/%m/%Y")
+            except (TypeError, ValueError, OSError):
+                upload_date = ""
+        source_url = video.webpage_url or video.url
+        status = "Sẵn sàng"
+        if duplicate:
+            downloaded_at = (duplicate.get("completed_at") or duplicate.get("created_at") or "")[:10]
+            status = f"Đã tải {downloaded_at}" if downloaded_at else "Đã tải trước đó"
+            self.append_log(f"Trùng lặp: {video.title} — {duplicate.get('source_url') or source_url}")
+        values = [
+            video.platform,
+            video.title,
+            video.uploader or "—",
+            views,
+            upload_date or "—",
+            format_duration(video.duration),
+            source_url,
+            status,
+        ]
         for column, value in enumerate(values, 1):
             self.preview_table.setItem(row, column, QTableWidgetItem(value))
         self.videos.append(video)
-        self.preview_count.setText(f"{len(self.videos)} video")
+        duplicate_count = sum(
+            1 for index in range(self.preview_table.rowCount())
+            if self.preview_table.item(index, 0).checkState() == Qt.Unchecked
+        )
+        suffix = f" • {duplicate_count} trùng" if duplicate_count else ""
+        self.preview_count.setText(f"{len(self.videos)} video{suffix}")
 
     def add_preview_error(self, url: str, error: str) -> None:
         self.append_log(f"Không thể đọc {url}: {error}")
@@ -293,7 +376,7 @@ class DownloadPage(QWidget):
         self._auto_queue_after_preview = auto_queue
         self.set_busy(True)
         self.append_log(f"Đang kiểm tra {len(urls)} link…")
-        self.preview_requested.emit(urls, self.playlist_mode.isChecked(), auto_queue)
+        self.preview_requested.emit(urls, self.current_preview_options(), auto_queue)
 
     def _queue_selected(self) -> None:
         selected = self.selected_videos()
@@ -318,6 +401,22 @@ class DownloadPage(QWidget):
             return
         detail = " • ".join(f"{name}: {count}" for name, count in counts.items())
         self.link_summary.setText(f"Đã nhận diện {len(urls)} link • {detail}")
+
+    def _update_mode_ui(self) -> None:
+        is_channel = self.channel_mode.isChecked()
+        self.channel_filters.setVisible(is_channel)
+        if is_channel:
+            self.url_label.setText("Link kênh — mỗi dòng một kênh")
+            self.url_input.setPlaceholderText(
+                "Dán link kênh YouTube hoặc trang cá nhân TikTok/Douyin.\n"
+                "Ví dụ: https://www.youtube.com/@tenkenh/videos"
+            )
+        else:
+            self.url_label.setText("Link video — mỗi dòng một link")
+            self.url_input.setPlaceholderText(
+                "Dán link vào đây. Ví dụ:\nhttps://www.youtube.com/watch?v=...\n"
+                "https://www.tiktok.com/@user/video/..."
+            )
 
 
 class QueuePage(QWidget):
@@ -390,12 +489,15 @@ class HistoryPage(QWidget):
         header.addStretch()
         header.addWidget(refresh)
         layout.addLayout(header)
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Thời gian", "Nền tảng", "Tiêu đề", "Trạng thái", "Đường dẫn"])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(
+            ["Thời gian", "Nền tảng", "Tiêu đề", "Link nguồn", "Trạng thái", "Đường dẫn"]
+        )
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
         layout.addWidget(self.table)
         self.reload()
 
@@ -403,7 +505,14 @@ class HistoryPage(QWidget):
         rows = self.database.recent()
         self.table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
-            values = [row["created_at"][:19].replace("T", " "), row["platform"], row["title"], row["status"], row["output_path"] or row["error"]]
+            values = [
+                row["created_at"][:19].replace("T", " "),
+                row["platform"],
+                row["title"],
+                row["source_url"],
+                row["status"],
+                row["output_path"] or row["error"],
+            ]
             for column, value in enumerate(values):
                 self.table.setItem(row_index, column, QTableWidgetItem(str(value)))
 
@@ -477,7 +586,7 @@ class MainWindow(QMainWindow):
         self.preview_pool = QThreadPool(self)
         self.preview_pool.setMaxThreadCount(1)
         self.queue = QueueController(self.engine, self.database, self.settings.concurrency)
-        self.setWindowTitle(f"{APP_NAME} 1.0 Preview")
+        self.setWindowTitle(f"{APP_NAME} 1.1")
         self.resize(1450, 890)
         self.setMinimumSize(1100, 700)
         self.setStyleSheet(APP_STYLE)
@@ -517,7 +626,7 @@ class MainWindow(QMainWindow):
             if index == 0:
                 button.setChecked(True)
         side_layout.addStretch()
-        version = QLabel("Bản 1.0 Preview\nWindows 10/11")
+        version = QLabel("Bản 1.1\nWindows 10/11")
         version.setObjectName("muted")
         side_layout.addWidget(version)
         root.addWidget(sidebar)
@@ -555,14 +664,19 @@ class MainWindow(QMainWindow):
         self.settings_page.settings_saved.connect(self._settings_saved)
         self.settings_page.update_engine_requested.connect(self._update_engine)
 
-    @Slot(list, bool, bool)
-    def _start_preview(self, urls: list[str], playlist: bool, _auto_queue: bool) -> None:
+    @Slot(list, object, bool)
+    def _start_preview(self, urls: list[str], preview_options: PreviewOptions, _auto_queue: bool) -> None:
         cookies = Path(self.settings.cookies_file) if self.settings.cookies_file else None
-        worker = PreviewWorker(self.engine, urls, playlist, cookies)
-        worker.signals.item.connect(self.download_page.add_preview_video)
+        worker = PreviewWorker(self.engine, urls, preview_options, cookies)
+        worker.signals.item.connect(self._add_preview_video)
         worker.signals.error.connect(self.download_page.add_preview_error)
         worker.signals.finished.connect(self.download_page.preview_finished)
         self.preview_pool.start(worker)
+
+    @Slot(object)
+    def _add_preview_video(self, video: VideoInfo) -> None:
+        duplicate = self.database.completed_record(video.unique_key) if self.settings.skip_duplicates else None
+        self.download_page.add_preview_video(video, duplicate)
 
     @Slot(list)
     def _add_to_queue(self, videos: list[VideoInfo]) -> None:
@@ -571,8 +685,23 @@ class MainWindow(QMainWindow):
         self.settings.quality = options.quality
         self.settings.media_format = options.media_format
         self.settings.save()
-        added, skipped = self.queue.add_videos(videos, options, skip_duplicates=self.settings.skip_duplicates)
-        self.download_page.append_log(f"Đã thêm {added} video vào hàng đợi; bỏ qua {skipped} video trùng.")
+        added, duplicates = self.queue.add_videos(
+            videos, options, skip_duplicates=self.settings.skip_duplicates
+        )
+        self.download_page.append_log(
+            f"Đã thêm {added} video vào hàng đợi; bỏ qua {len(duplicates)} video trùng."
+        )
+        if duplicates:
+            lines = [f"• {video.title}\n  {video.webpage_url or video.url}" for video in duplicates[:8]]
+            remaining = len(duplicates) - len(lines)
+            if remaining > 0:
+                lines.append(f"… và {remaining} video khác")
+            QMessageBox.information(
+                self,
+                "Phát hiện video trùng",
+                "Các video sau đã tải hoặc đang nằm trong hàng đợi nên được bỏ qua:\n\n"
+                + "\n".join(lines),
+            )
         if added:
             self.stack.setCurrentIndex(1)
 

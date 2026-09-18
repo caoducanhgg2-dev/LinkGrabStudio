@@ -29,6 +29,8 @@ class VideoInfo:
     webpage_url: str = ""
     extractor: str = ""
     playlist_title: str = ""
+    view_count: int | None = None
+    upload_date: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
@@ -50,6 +52,17 @@ class DownloadOptions:
 
 
 @dataclass(slots=True)
+class PreviewOptions:
+    playlist: bool = False
+    channel: bool = False
+    channel_limit: int = 100
+    channel_scan_limit: int = 500
+    sort_by: str = "views"
+    since_days: int = 365
+    skip_duplicates: bool = True
+
+
+@dataclass(slots=True)
 class DownloadJob:
     job_id: str
     video: VideoInfo
@@ -60,4 +73,3 @@ class DownloadJob:
     eta: str = "—"
     output_path: str = ""
     error: str = ""
-

@@ -55,6 +55,20 @@ class HistoryDatabase:
             ).fetchone()
             return row is not None
 
+    def completed_record(self, unique_key: str) -> dict[str, str] | None:
+        """Return the newest completed record used for duplicate notices."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT title, source_url, output_path, completed_at, created_at
+                FROM downloads
+                WHERE unique_key=? AND status=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (unique_key, DownloadStatus.COMPLETED.value),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def record_job(self, job: DownloadJob) -> None:
         now = datetime.now(timezone.utc).isoformat()
         completed = now if job.status == DownloadStatus.COMPLETED else None
@@ -104,4 +118,3 @@ class HistoryDatabase:
                 params,
             ).fetchall()
         return {str(row[0]) for row in rows}
-

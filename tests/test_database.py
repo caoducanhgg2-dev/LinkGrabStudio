@@ -17,6 +17,9 @@ def test_completed_video_is_detected(tmp_path: Path) -> None:
     database.record_job(job)
     assert database.has_completed(video.unique_key)
     assert video.unique_key in database.completed_keys([video])
+    record = database.completed_record(video.unique_key)
+    assert record is not None
+    assert record["source_url"] == "https://youtu.be/abc"
 
 
 def test_failed_video_is_not_duplicate(tmp_path: Path) -> None:
@@ -25,4 +28,4 @@ def test_failed_video_is_not_duplicate(tmp_path: Path) -> None:
     job = DownloadJob("job-2", video, DownloadOptions(tmp_path), status=DownloadStatus.FAILED)
     database.record_job(job)
     assert not database.has_completed(video.unique_key)
-
+    assert database.completed_record(video.unique_key) is None

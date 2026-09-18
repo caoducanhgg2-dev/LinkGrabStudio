@@ -6,10 +6,11 @@ import re
 import subprocess
 import sys
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .models import DownloadJob, DownloadOptions, DownloadStatus, VideoInfo
+from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions, VideoInfo
 from .utils import detect_platform
 
 
@@ -106,6 +107,61 @@ class DownloaderEngine:
             else:
                 videos.append(self._video_from_json(payload, fallback_url=url))
         return videos
+
+    def preview_channel(
+        self,
+        urls: Iterable[str],
+        options: PreviewOptions,
+        *,
+        cookies_file: Path | None = None,
+    ) -> list[VideoInfo]:
+        """Read a channel/profile, then filter and rank its recent videos."""
+        candidates: list[VideoInfo] = []
+        for url in urls:
+            url = self._normalize_channel_url(url)
+            command = [
+                str(self.ytdlp),
+                "--dump-single-json",
+                "--skip-download",
+                "--no-warnings",
+                "--ignore-config",
+                "--yes-playlist",
+                "--extract-flat",
+                "--playlist-end",
+                str(max(options.channel_limit, options.channel_scan_limit)),
+            ]
+            command += self._javascript_options()
+            if cookies_file and cookies_file.is_file():
+                command += ["--cookies", str(cookies_file)]
+            command.append(url)
+            try:
+                result = self._run_capture(command, timeout=300)
+            except FileNotFoundError as exc:
+                raise DownloaderError("Không tìm thấy yt-dlp trong gói ứng dụng.") from exc
+            except subprocess.TimeoutExpired as exc:
+                raise DownloaderError("Quá thời gian đọc danh sách video của kênh.") from exc
+            if result.returncode != 0:
+                raise DownloaderError(self._friendly_error(result.stderr or result.stdout))
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise DownloaderError("Kênh trả về dữ liệu không hợp lệ.") from exc
+            entries = payload.get("entries") or []
+            for entry in entries:
+                if entry:
+                    candidates.append(self._video_from_json(entry, fallback_url=url, playlist=payload))
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, options.since_days))
+        filtered = [video for video in candidates if self._is_recent(video, cutoff)]
+        unique: dict[str, VideoInfo] = {}
+        for video in filtered:
+            unique.setdefault(video.unique_key, video)
+        filtered = list(unique.values())
+        if options.sort_by == "newest":
+            filtered.sort(key=self._video_timestamp, reverse=True)
+        else:
+            filtered.sort(key=lambda video: (video.view_count or 0, self._video_timestamp(video)), reverse=True)
+        return filtered[: max(1, options.channel_limit)]
 
     def download(
         self,
@@ -267,8 +323,51 @@ class DownloaderEngine:
             webpage_url=webpage_url,
             extractor=extractor,
             playlist_title=str((playlist or {}).get("title") or ""),
+            view_count=DownloaderEngine._optional_int(data.get("view_count")),
+            upload_date=str(data.get("upload_date") or data.get("release_date") or ""),
             raw=data,
         )
+
+    @staticmethod
+    def _optional_int(value) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _video_timestamp(video: VideoInfo) -> int:
+        for key in ("timestamp", "release_timestamp"):
+            value = video.raw.get(key)
+            try:
+                if value is not None:
+                    return int(value)
+            except (TypeError, ValueError):
+                pass
+        date_text = video.upload_date
+        try:
+            return int(datetime.strptime(date_text, "%Y%m%d").replace(tzinfo=timezone.utc).timestamp())
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _is_recent(cls, video: VideoInfo, cutoff: datetime) -> bool:
+        timestamp = cls._video_timestamp(video)
+        if timestamp <= 0:
+            # Some flat channel extractors do not expose dates. Keep the item so
+            # a supported channel never becomes an empty list only due to sparse metadata.
+            return True
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc) >= cutoff
+
+    @staticmethod
+    def _normalize_channel_url(url: str) -> str:
+        clean = url.rstrip("/")
+        lowered = clean.lower()
+        if ("youtube.com/@" in lowered or "/channel/" in lowered or "/c/" in lowered) and not any(
+            lowered.endswith(suffix) for suffix in ("/videos", "/shorts", "/streams")
+        ):
+            return f"{clean}/videos"
+        return url
 
     @classmethod
     def _parse_progress(cls, line: str) -> tuple[float, str, str]:

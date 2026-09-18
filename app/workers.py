@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
 from .database import HistoryDatabase
 from .downloader import DownloaderEngine, DownloaderError
-from .models import DownloadJob, DownloadOptions, DownloadStatus, VideoInfo
+from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions, VideoInfo
 from .updater import EngineUpdater
 
 
@@ -18,11 +18,11 @@ class PreviewSignals(QObject):
 
 
 class PreviewWorker(QRunnable):
-    def __init__(self, engine: DownloaderEngine, urls: list[str], playlist: bool, cookies_file) -> None:
+    def __init__(self, engine: DownloaderEngine, urls: list[str], options: PreviewOptions, cookies_file) -> None:
         super().__init__()
         self.engine = engine
         self.urls = urls
-        self.playlist = playlist
+        self.options = options
         self.cookies_file = cookies_file
         self.signals = PreviewSignals()
 
@@ -30,7 +30,13 @@ class PreviewWorker(QRunnable):
     def run(self) -> None:
         for url in self.urls:
             try:
-                for video in self.engine.preview([url], playlist=self.playlist, cookies_file=self.cookies_file):
+                if self.options.channel:
+                    videos = self.engine.preview_channel([url], self.options, cookies_file=self.cookies_file)
+                else:
+                    videos = self.engine.preview(
+                        [url], playlist=self.options.playlist, cookies_file=self.cookies_file
+                    )
+                for video in videos:
                     self.signals.item.emit(video)
             except DownloaderError as exc:
                 self.signals.error.emit(url, str(exc))
@@ -106,13 +112,14 @@ class QueueController(QObject):
         options: DownloadOptions,
         *,
         skip_duplicates: bool = True,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, list[VideoInfo]]:
         completed_keys = self.database.completed_keys(videos) if skip_duplicates else set()
         active_keys = {job.video.unique_key for job in self.jobs.values() if job.status not in {DownloadStatus.FAILED, DownloadStatus.CANCELLED}}
-        added = skipped = 0
+        added = 0
+        duplicates: list[VideoInfo] = []
         for video in videos:
             if video.unique_key in completed_keys or video.unique_key in active_keys:
-                skipped += 1
+                duplicates.append(video)
                 continue
             job = DownloadJob(job_id=uuid4().hex, video=video, options=options)
             self.jobs[job.job_id] = job
@@ -122,7 +129,7 @@ class QueueController(QObject):
             self.job_added.emit(job)
         self._emit_counts()
         self._pump()
-        return added, skipped
+        return added, duplicates
 
     def cancel_all(self) -> None:
         self.engine.cancel_all()

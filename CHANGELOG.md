@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0
+
+- Mở chế độ tải theo kênh cho YouTube, TikTok và Douyin.
+- Lọc video trong khoảng 1 tuần đến 1 năm.
+- Sắp xếp danh sách theo lượt xem cao nhất hoặc mới nhất.
+- Thêm cột lượt xem, ngày đăng và link nguồn khi xem trước.
+- Tự bỏ chọn video đã tải; ghi log và hiện hộp thoại khi phát hiện trùng.
+- Lịch sử tải hiển thị URL nguồn đã lưu trong SQLite.
+- Phát hành bằng gói cập nhật ZIP nhỏ có kiểm tra checksum, sao lưu và rollback.
+
 ## 1.0.0-preview.1
 
 - Tạo giao diện desktop Windows tối theo bố cục tham khảo.

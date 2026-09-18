@@ -1,3 +1,7 @@
+param(
+    [switch]$SkipInstaller
+)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
@@ -35,14 +39,16 @@ if (-not (Test-Path $AppExe)) {
 
 Write-Host "Portable build ready: $AppExe"
 
-$IsccCandidates = @(
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
-)
-$Iscc = $IsccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($Iscc) {
-    & $Iscc "$PSScriptRoot\installer.iss"
-    Write-Host "Installer build completed."
-} else {
-    Write-Warning "Inno Setup 6 not found. Portable build is still available."
+if (-not $SkipInstaller) {
+    $IsccCandidates = @(
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+    )
+    $Iscc = $IsccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($Iscc) {
+        & $Iscc "$PSScriptRoot\installer.iss"
+        Write-Host "Installer build completed."
+    } else {
+        Write-Warning "Inno Setup 6 not found. Portable build is still available."
+    }
 }

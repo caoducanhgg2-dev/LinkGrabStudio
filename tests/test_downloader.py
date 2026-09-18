@@ -1,7 +1,10 @@
+import json
+import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.downloader import DownloaderEngine
-from app.models import DownloadOptions
+from app.models import DownloadOptions, PreviewOptions
 
 
 def test_mp4_command_has_quality_and_safe_output(tmp_path: Path) -> None:
@@ -28,3 +31,84 @@ def test_mp3_command(tmp_path: Path) -> None:
     assert "--extract-audio" in command
     assert command[command.index("--audio-format") + 1] == "mp3"
 
+
+def test_channel_preview_filters_period_and_sorts_by_views(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "title": "Test channel",
+        "entries": [
+            {
+                "id": "recent-low",
+                "title": "Recent low",
+                "webpage_url": "https://youtube.com/watch?v=recent-low",
+                "extractor_key": "Youtube",
+                "timestamp": int((now - timedelta(days=2)).timestamp()),
+                "view_count": 100,
+            },
+            {
+                "id": "recent-high",
+                "title": "Recent high",
+                "webpage_url": "https://youtube.com/watch?v=recent-high",
+                "extractor_key": "Youtube",
+                "timestamp": int((now - timedelta(days=4)).timestamp()),
+                "view_count": 900,
+            },
+            {
+                "id": "old",
+                "title": "Old popular",
+                "webpage_url": "https://youtube.com/watch?v=old",
+                "extractor_key": "Youtube",
+                "timestamp": int((now - timedelta(days=30)).timestamp()),
+                "view_count": 999999,
+            },
+        ],
+    }
+
+    def fake_run(command, timeout):
+        assert "--extract-flat" in command
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(engine, "_run_capture", fake_run)
+    videos = engine.preview_channel(
+        ["https://youtube.com/@test/videos"],
+        PreviewOptions(channel=True, channel_limit=10, since_days=7, sort_by="views"),
+    )
+    assert [video.video_id for video in videos] == ["recent-high", "recent-low"]
+
+
+def test_channel_preview_limits_results_and_sorts_newest(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "entries": [
+            {
+                "id": str(index),
+                "title": str(index),
+                "webpage_url": f"https://youtube.com/watch?v={index}",
+                "extractor_key": "Youtube",
+                "timestamp": int((now - timedelta(days=index)).timestamp()),
+                "view_count": index * 100,
+            }
+            for index in range(1, 6)
+        ]
+    }
+    monkeypatch.setattr(
+        engine,
+        "_run_capture",
+        lambda command, timeout: subprocess.CompletedProcess(command, 0, json.dumps(payload), ""),
+    )
+    videos = engine.preview_channel(
+        ["https://youtube.com/@test/videos"],
+        PreviewOptions(channel=True, channel_limit=2, since_days=365, sort_by="newest"),
+    )
+    assert [video.video_id for video in videos] == ["1", "2"]
+
+
+def test_channel_url_is_normalized_to_videos_tab() -> None:
+    assert (
+        DownloaderEngine._normalize_channel_url("https://www.youtube.com/@example")
+        == "https://www.youtube.com/@example/videos"
+    )
+    existing = "https://www.youtube.com/@example/shorts"
+    assert DownloaderEngine._normalize_channel_url(existing) == existing

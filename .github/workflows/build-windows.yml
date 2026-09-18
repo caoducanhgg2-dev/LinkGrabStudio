@@ -1,4 +1,4 @@
-name: Build Windows Installer
+name: Build LinkGrab 1.1 Update
 
 on:
   workflow_dispatch:
@@ -23,35 +23,18 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
-
       - name: Build and test
         shell: powershell
-        run: .\build\build_windows.ps1
+        run: .\build\build_windows.ps1 -SkipInstaller
 
-      - name: Create portable ZIP
+      - name: Create small update ZIP
         shell: powershell
-        run: Compress-Archive -Path .\dist\LinkGrabStudio\* -DestinationPath .\dist\LinkGrabStudio_Portable_1.0.0-preview.1.zip -Force
-
-      - name: Create checksums
-        shell: powershell
-        run: |
-          $files = @(
-            Get-ChildItem .\dist\installer\*.exe
-            Get-ChildItem .\dist\*.zip
-          )
-          $lines = $files | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $($_.Name)"
-          }
-          Set-Content -Path .\dist\SHA256SUMS.txt -Value $lines -Encoding ascii
+        run: .\build\make_update_patch.ps1 -Version "1.1.0"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LinkGrabStudio-Windows
+          name: LinkGrabStudio-Update-1.1
           path: |
-            dist/installer/*.exe
-            dist/*.zip
-            dist/SHA256SUMS.txt
+            dist/LinkGrabStudio_Update_1.1.0.zip
+            dist/SHA256SUMS_UPDATE.txt
           if-no-files-found: error
