@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Sửa lỗi cú pháp dấu ngoặc kép trong trình cập nhật PowerShell.
+- Chuyển thông báo của script sang ASCII để tương thích Windows PowerShell 5.1.
+- Không thay đổi ứng dụng hoặc dữ liệu người dùng nếu cập nhật thất bại.
+
 ## 1.1.0
 
 - Mở chế độ tải theo kênh cho YouTube, TikTok và Douyin.

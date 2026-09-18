@@ -16,13 +16,13 @@ function Show-Message([string]$Text, [string]$Title = "LinkGrab Studio 1.1") {
 
 try {
     if (-not (Test-Path $PayloadExe) -or -not (Test-Path $ManifestPath)) {
-        throw "Gói cập nhật thiếu payload hoặc manifest.json. Hãy giải nén lại toàn bộ file ZIP."
+        throw "Goi cap nhat thieu payload hoac manifest.json. Hay giai nen lai toan bo file ZIP."
     }
 
     $Manifest = Get-Content $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $ActualHash = (Get-FileHash $PayloadExe -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($ActualHash -ne [string]$Manifest.sha256) {
-        throw "File cập nhật không vượt qua kiểm tra SHA-256. Không có file cũ nào bị thay đổi."
+        throw "File cap nhat khong vuot qua kiem tra SHA-256. Khong co file cu nao bi thay doi."
     }
 
     if (-not $InstallDir) {
@@ -36,11 +36,11 @@ try {
             Select-Object -First 1
     }
     if (-not $InstallDir -or -not (Test-Path (Join-Path $InstallDir "LinkGrabStudio.exe"))) {
-        throw "Không tìm thấy LinkGrabStudio.exe. Hãy chạy: CapNhat_1.1.cmd \"D:\duong-dan\LinkGrabStudio\""
+        throw 'Khong tim thay LinkGrabStudio.exe. Hay chay: CapNhat_1.1.cmd "D:\duong-dan\LinkGrabStudio"'
     }
 
     if (Get-Process -Name "LinkGrabStudio" -ErrorAction SilentlyContinue) {
-        throw "LinkGrab Studio đang chạy. Hãy đóng ứng dụng rồi chạy lại cập nhật."
+        throw "LinkGrab Studio dang chay. Hay dong ung dung roi chay lai cap nhat."
     }
 
     $TargetExe = Join-Path $InstallDir "LinkGrabStudio.exe"
@@ -55,7 +55,7 @@ try {
         Copy-Item $PayloadExe $StagedExe -Force
         $StagedHash = (Get-FileHash $StagedExe -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($StagedHash -ne [string]$Manifest.sha256) {
-            throw "File tạm không khớp checksum."
+            throw "File tam khong khop checksum."
         }
         Move-Item $StagedExe $TargetExe -Force
         $VersionInfo = @{
@@ -68,12 +68,12 @@ try {
     } catch {
         Remove-Item $StagedExe -Force -ErrorAction SilentlyContinue
         Copy-Item (Join-Path $BackupDir "LinkGrabStudio.exe") $TargetExe -Force
-        throw "Cập nhật thất bại; bản cũ đã được khôi phục tự động. Chi tiết: $($_.Exception.Message)"
+        throw "Cap nhat that bai; ban cu da duoc khoi phuc tu dong. Chi tiet: $($_.Exception.Message)"
     }
 
-    Show-Message "Cập nhật LinkGrab Studio 1.1 thành công.`n`nLịch sử tải và dữ liệu chống trùng được giữ nguyên."
+    Show-Message "Cap nhat LinkGrab Studio 1.1 thanh cong.`n`nLich su tai va du lieu chong trung duoc giu nguyen."
     Start-Process $TargetExe
 } catch {
-    Show-Message $_.Exception.Message "Không thể cập nhật LinkGrab Studio"
+    Show-Message $_.Exception.Message "Khong the cap nhat LinkGrab Studio"
     exit 1
 }

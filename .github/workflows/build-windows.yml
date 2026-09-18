@@ -23,18 +23,24 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Validate updater PowerShell syntax
+        shell: powershell
+        run: |
+          $source = Get-Content .\build\Apply_Update_1.1.ps1 -Raw -Encoding UTF8
+          [scriptblock]::Create($source) | Out-Null
+
       - name: Build and test
         shell: powershell
         run: .\build\build_windows.ps1 -SkipInstaller
 
       - name: Create small update ZIP
         shell: powershell
-        run: .\build\make_update_patch.ps1 -Version "1.1.0"
+        run: .\build\make_update_patch.ps1 -Version "1.1.1"
 
       - uses: actions/upload-artifact@v4
         with:
           name: LinkGrabStudio-Update-1.1
           path: |
-            dist/LinkGrabStudio_Update_1.1.0.zip
+            dist/LinkGrabStudio_Update_1.1.1.zip
             dist/SHA256SUMS_UPDATE.txt
           if-no-files-found: error
