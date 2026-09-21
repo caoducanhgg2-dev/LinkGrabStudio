@@ -10,7 +10,6 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
@@ -270,16 +269,16 @@ class DownloaderEngine:
         found: list[str] = []
         seen: set[str] = set()
         search_text = f"site:douyin.com/video {query}"
-        providers: list[tuple[str, str]] = []
+        providers: list[str] = []
         for first in range(1, wanted + 1, 50):
             params = urllib.parse.urlencode(
                 {"q": search_text, "format": "rss", "count": "50", "first": str(first)}
             )
-            providers.append(("https://www.bing.com/search?" + params, "rss"))
+            providers.append("https://www.bing.com/search?" + params)
         ddg_params = urllib.parse.urlencode({"q": search_text})
-        providers.append(("https://html.duckduckgo.com/html/?" + ddg_params, "html"))
+        providers.append("https://html.duckduckgo.com/html/?" + ddg_params)
 
-        for url, provider_type in providers:
+        for url in providers:
             request = urllib.request.Request(
                 url,
                 headers={
@@ -296,18 +295,12 @@ class DownloaderEngine:
             except (OSError, urllib.error.URLError):
                 continue
 
-            candidates: list[str] = []
-            if provider_type == "rss":
-                try:
-                    root = ET.fromstring(body)
-                    candidates.extend(
-                        (node.text or "").strip() for node in root.findall(".//item/link")
-                    )
-                except ET.ParseError:
-                    pass
+            # Bing RSS and DuckDuckGo HTML both contain the direct video URL as
+            # plain text after decoding. Avoid ElementTree here: frozen Windows
+            # builds may not include pyexpat, and a full XML parser is unnecessary.
             decoded = html.unescape(urllib.parse.unquote(body))
-            candidates.extend(
-                re.findall(r"https?://(?:www\.)?douyin\.com/video/\d+", decoded)
+            candidates = re.findall(
+                r"https?://(?:www\.)?douyin\.com/video/\d+", decoded
             )
             for candidate in candidates:
                 normalized = self._normalize_douyin_video_url(candidate)

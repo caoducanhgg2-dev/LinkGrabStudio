@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2
+
+- Sửa lỗi bản Windows báo `No module named expat; use SimpleXMLTreeBuilder instead` khi tìm video Douyin.
+- Loại bỏ hoàn toàn phụ thuộc bộ phân tích XML/pyexpat khỏi chức năng dò URL Douyin.
+- Đọc trực tiếp URL video từ phản hồi tìm kiếm nhẹ, giữ nguyên dịch từ khóa, bộ lọc và chống trùng.
+- Tiếp tục phát hành dưới dạng ZIP cập nhật nhỏ, giữ lịch sử tải và cài đặt người dùng.
+
 ## 1.3.1
 
 - Sửa lỗi tìm kiếm Douyin báo `Link này chưa được hỗ trợ`.
