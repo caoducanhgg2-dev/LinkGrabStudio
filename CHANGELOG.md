@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+
+- Thêm tìm kiếm video Douyin theo từ khóa trong chế độ Theo từ khóa.
+- Tự dịch từ khóa sang tiếng Trung giản thể hoặc phồn thể; Douyin mặc định dùng giản thể.
+- Ghi từ khóa gốc và từ khóa sau dịch trong nhật ký hoạt động.
+- Video đã tải vẫn tự bỏ chọn, nhưng có thể tích chọn lại để tải lại khi cần.
+- Khi thêm video trùng, app hỏi rõ Bỏ qua hoặc Tải lại; tải lại buộc ghi đè file cũ.
+- Giữ nguyên lịch sử tải, link nguồn, lọc thời gian, xếp hạng và hàng đợi hiện có.
+
 ## 1.2.0
 
 - Thêm chế độ tìm video YouTube theo từ khóa, ví dụ `mukbang`.

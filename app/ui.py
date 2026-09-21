@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -62,6 +63,7 @@ class DownloadPage(QWidget):
         self.settings = settings
         self.videos: list[VideoInfo] = []
         self._preview_errors: list[str] = []
+        self._logged_translations: set[tuple[str, str]] = set()
         self._auto_queue_after_preview = False
         self._setup_ui()
 
@@ -96,6 +98,7 @@ class DownloadPage(QWidget):
             button.setChecked(index == 0)
             self.platform_group.addButton(button)
             self.platform_buttons[label] = button
+            button.clicked.connect(self._platform_changed)
             platform_row.addWidget(button)
         more = QPushButton("＋ Nền tảng khác (sắp có)")
         more.setObjectName("platform")
@@ -133,8 +136,8 @@ class DownloadPage(QWidget):
         form.addLayout(mode_row)
 
         channel_hint = QLabel(
-            "MỚI 1.2: Tìm video YouTube theo từ khóa; lọc 1–300 video theo lượt xem, "
-            "ngày đăng và tự loại video đã tải."
+            "MỚI 1.3: Tìm video YouTube/Douyin theo từ khóa, tự dịch sang tiếng Trung; "
+            "video trùng có thể bỏ qua hoặc tải lại."
         )
         channel_hint.setObjectName("countBadge")
         channel_hint.setWordWrap(True)
@@ -199,6 +202,7 @@ class DownloadPage(QWidget):
         search_grid.addWidget(QLabel("Số video"), 0, 0)
         search_grid.addWidget(QLabel("Sắp xếp"), 0, 1)
         search_grid.addWidget(QLabel("Khoảng thời gian"), 0, 2)
+        search_grid.addWidget(QLabel("Ngôn ngữ"), 0, 3)
         self.search_limit = QSpinBox()
         self.search_limit.setRange(1, 300)
         self.search_limit.setValue(50)
@@ -216,11 +220,16 @@ class DownloadPage(QWidget):
             ("Trong 1 năm", 365),
         ):
             self.search_period.addItem(label, days)
+        self.search_language = QComboBox()
+        self.search_language.addItem("Giữ nguyên", "original")
+        self.search_language.addItem("Dịch sang tiếng Trung (giản thể)", "zh-cn")
+        self.search_language.addItem("Dịch sang tiếng Trung (phồn thể)", "zh-tw")
         search_grid.addWidget(self.search_limit, 1, 0)
         search_grid.addWidget(self.search_sort, 1, 1)
         search_grid.addWidget(self.search_period, 1, 2)
+        search_grid.addWidget(self.search_language, 1, 3)
         search_note = QLabel(
-            "YouTube sẽ tìm rộng hơn số lượng yêu cầu, sau đó app lọc và xếp hạng kết quả tốt nhất."
+            "YouTube/Douyin sẽ tìm rộng hơn số lượng yêu cầu, sau đó app lọc và xếp hạng kết quả tốt nhất."
         )
         search_note.setObjectName("muted")
         search_grid.addWidget(search_note, 2, 0, 1, 3)
@@ -339,6 +348,8 @@ class DownloadPage(QWidget):
             playlist=self.playlist_mode.isChecked(),
             channel=self.channel_mode.isChecked(),
             keyword_search=is_search,
+            search_platform=self.selected_platform(),
+            search_language=str(self.search_language.currentData()),
             channel_limit=channel_limit,
             channel_scan_limit=max(100, min(500, channel_limit * 5)),
             search_limit=search_limit,
@@ -361,10 +372,18 @@ class DownloadPage(QWidget):
     def clear_preview(self) -> None:
         self.videos.clear()
         self._preview_errors.clear()
+        self._logged_translations.clear()
         self.preview_table.setRowCount(0)
         self.preview_count.setText("0 video")
 
     def add_preview_video(self, video: VideoInfo, duplicate: dict[str, str] | None = None) -> None:
+        original_query = str(video.raw.get("search_query_original") or "")
+        translated_query = str(video.raw.get("search_query_translated") or "")
+        translation = (original_query, translated_query)
+        if original_query and translated_query and original_query != translated_query:
+            if translation not in self._logged_translations:
+                self._logged_translations.add(translation)
+                self.append_log(f"Đã dịch từ khóa: {original_query} → {translated_query}")
         row = self.preview_table.rowCount()
         self.preview_table.insertRow(row)
         select_item = QTableWidgetItem()
@@ -384,7 +403,10 @@ class DownloadPage(QWidget):
         status = "Sẵn sàng"
         if duplicate:
             downloaded_at = (duplicate.get("completed_at") or duplicate.get("created_at") or "")[:10]
-            status = f"Đã tải {downloaded_at}" if downloaded_at else "Đã tải trước đó"
+            status = (
+                f"Đã tải {downloaded_at} — tích chọn để tải lại"
+                if downloaded_at else "Đã tải trước đó — tích chọn để tải lại"
+            )
             self.append_log(f"Trùng lặp: {video.title} — {duplicate.get('source_url') or source_url}")
         values = [
             video.platform,
@@ -464,7 +486,8 @@ class DownloadPage(QWidget):
         if self.keyword_mode.isChecked():
             queries = self.current_queries()
             self.link_summary.setText(
-                f"Đã nhập {len(queries)} từ khóa YouTube" if queries else "Chưa có từ khóa"
+                f"Đã nhập {len(queries)} từ khóa {self.selected_platform()}"
+                if queries else "Chưa có từ khóa"
             )
             return
         urls = self.current_urls()
@@ -484,10 +507,17 @@ class DownloadPage(QWidget):
         self.channel_filters.setVisible(is_channel)
         self.search_filters.setVisible(is_search)
         for name, button in self.platform_buttons.items():
-            button.setEnabled(not is_search or name == "YouTube")
+            button.setEnabled(not is_search or name in {"YouTube", "Douyin"})
         if is_search:
-            self.platform_buttons["YouTube"].setChecked(True)
-            self.url_label.setText("Từ khóa YouTube — mỗi dòng một từ khóa")
+            platform = self.selected_platform()
+            if platform not in {"YouTube", "Douyin"}:
+                self.platform_buttons["YouTube"].setChecked(True)
+                platform = "YouTube"
+            if platform == "Douyin" and self.search_language.currentData() == "original":
+                translated_index = self.search_language.findData("zh-cn")
+                if translated_index >= 0:
+                    self.search_language.setCurrentIndex(translated_index)
+            self.url_label.setText(f"Từ khóa {platform} — mỗi dòng một từ khóa")
             self.url_input.setPlaceholderText(
                 "Nhập từ khóa cần tìm. Ví dụ:\nmukbang\nbushcraft shelter\nhouse renovation"
             )
@@ -504,6 +534,21 @@ class DownloadPage(QWidget):
                 "https://www.tiktok.com/@user/video/..."
             )
         self._update_link_summary()
+
+    def selected_platform(self) -> str:
+        for name, button in self.platform_buttons.items():
+            if button.isChecked():
+                return name
+        return "YouTube"
+
+    def _platform_changed(self) -> None:
+        if not hasattr(self, "keyword_mode") or not self.keyword_mode.isChecked():
+            return
+        target = "zh-cn" if self.selected_platform() == "Douyin" else "original"
+        index = self.search_language.findData(target)
+        if index >= 0:
+            self.search_language.setCurrentIndex(index)
+        self._update_mode_ui()
 
 
 class QueuePage(QWidget):
@@ -673,7 +718,7 @@ class MainWindow(QMainWindow):
         self.preview_pool = QThreadPool(self)
         self.preview_pool.setMaxThreadCount(1)
         self.queue = QueueController(self.engine, self.database, self.settings.concurrency)
-        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Từ khóa + Kênh")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Douyin + Tải lại")
         self.resize(1450, 890)
         self.setMinimumSize(1100, 700)
         self.setStyleSheet(APP_STYLE)
@@ -713,7 +758,7 @@ class MainWindow(QMainWindow):
             if index == 0:
                 button.setChecked(True)
         side_layout.addStretch()
-        version = QLabel(f"Bản {APP_VERSION}\nTừ khóa + Kênh\nWindows 10/11")
+        version = QLabel(f"Bản {APP_VERSION}\nDouyin + Tải lại\nWindows 10/11")
         version.setObjectName("muted")
         side_layout.addWidget(version)
         root.addWidget(sidebar)
@@ -772,9 +817,45 @@ class MainWindow(QMainWindow):
         self.settings.quality = options.quality
         self.settings.media_format = options.media_format
         self.settings.save()
+        completed = [
+            video for video in videos
+            if self.settings.skip_duplicates and self.database.has_completed(video.unique_key)
+        ]
+        fresh = [video for video in videos if video not in completed]
+        reload_duplicates = False
+        if completed:
+            message = QMessageBox(self)
+            message.setIcon(QMessageBox.Warning)
+            message.setWindowTitle("Phát hiện video đã tải")
+            message.setText(f"Có {len(completed)} video đã được tải trước đó.")
+            message.setInformativeText(
+                "Chọn Bỏ qua để giữ file cũ, hoặc Tải lại để tải và ghi lại các video này."
+            )
+            skip_button = message.addButton("Bỏ qua video trùng", QMessageBox.RejectRole)
+            reload_button = message.addButton("Tải lại video trùng", QMessageBox.AcceptRole)
+            message.addButton(QMessageBox.Cancel)
+            message.exec()
+            clicked = message.clickedButton()
+            if clicked is None or (clicked is not skip_button and clicked is not reload_button):
+                self.download_page.append_log("Đã hủy thao tác thêm video trùng vào hàng đợi.")
+                return
+            reload_duplicates = clicked is reload_button
+
         added, duplicates = self.queue.add_videos(
-            videos, options, skip_duplicates=self.settings.skip_duplicates
+            fresh, options, skip_duplicates=self.settings.skip_duplicates
         )
+        if reload_duplicates:
+            reload_options = replace(options, overwrite_existing=True)
+            reloaded, active_duplicates = self.queue.add_videos(
+                completed, reload_options, skip_duplicates=False
+            )
+            added += reloaded
+            duplicates.extend(active_duplicates)
+            self.download_page.append_log(
+                f"Đã chọn tải lại {reloaded}/{len(completed)} video trùng."
+            )
+        else:
+            duplicates.extend(completed)
         self.download_page.append_log(
             f"Đã thêm {added} video vào hàng đợi; bỏ qua {len(duplicates)} video trùng."
         )

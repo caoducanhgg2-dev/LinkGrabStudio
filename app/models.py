@@ -40,6 +40,8 @@ class VideoInfo:
             source = "youtube"
         elif source.startswith("tiktok"):
             source = "tiktok"
+        elif source.startswith("douyin"):
+            source = "douyin"
         return f"{source}:{self.video_id}"
 
 
@@ -53,6 +55,7 @@ class DownloadOptions:
     thumbnail: bool = False
     metadata: bool = False
     cookies_file: Path | None = None
+    overwrite_existing: bool = False
 
 
 @dataclass(slots=True)
@@ -60,6 +63,8 @@ class PreviewOptions:
     playlist: bool = False
     channel: bool = False
     keyword_search: bool = False
+    search_platform: str = "YouTube"
+    search_language: str = "original"
     channel_limit: int = 100
     channel_scan_limit: int = 500
     search_limit: int = 50

@@ -230,3 +230,58 @@ def test_keyword_search_filters_time_and_normalizes_duplicate_key(monkeypatch) -
     )
     assert [video.video_id for video in videos] == ["recent"]
     assert videos[0].unique_key == "youtube:recent"
+
+
+def test_douyin_keyword_search_translates_and_builds_search_url(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    payload = {
+        "entries": [
+            {
+                "id": "729001",
+                "title": "吃播",
+                "url": "https://example.test/media.mp4",
+                "extractor_key": "Douyin",
+                "view_count": 9000,
+            }
+        ]
+    }
+    commands: list[list[str]] = []
+    monkeypatch.setattr(engine, "translate_keyword", lambda query, language: "吃播")
+
+    def fake_run(command, timeout):
+        commands.append(list(command))
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(engine, "_run_capture", fake_run)
+    videos = engine.preview_search(
+        ["mukbang"],
+        PreviewOptions(
+            keyword_search=True,
+            search_platform="Douyin",
+            search_language="zh-cn",
+            search_limit=10,
+            search_scan_limit=50,
+            since_days=0,
+            sort_by="views",
+        ),
+    )
+    assert commands[0][-1] == "https://www.douyin.com/search/%E5%90%83%E6%92%AD?type=video"
+    assert videos[0].platform == "Douyin"
+    assert videos[0].webpage_url == "https://www.douyin.com/video/729001"
+    assert videos[0].unique_key == "douyin:729001"
+    assert videos[0].raw["search_query_original"] == "mukbang"
+    assert videos[0].raw["search_query_translated"] == "吃播"
+
+
+def test_force_reload_adds_force_overwrites(tmp_path: Path) -> None:
+    engine = DownloaderEngine()
+    engine.ytdlp = Path("yt-dlp.exe")
+    engine.ffmpeg = Path("missing-ffmpeg.exe")
+    engine.deno = Path("missing-deno.exe")
+    options = DownloadOptions(
+        output_dir=tmp_path,
+        media_format="MP4",
+        overwrite_existing=True,
+    )
+    command = engine.build_download_command("https://youtu.be/abc", options)
+    assert "--force-overwrites" in command

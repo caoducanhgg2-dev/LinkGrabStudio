@@ -6,6 +6,9 @@ import re
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
@@ -177,7 +180,7 @@ class DownloaderEngine:
         *,
         cookies_file: Path | None = None,
     ) -> list[VideoInfo]:
-        """Search YouTube by keyword, then filter, rank and deduplicate results."""
+        """Search YouTube or Douyin by keyword, then filter and rank results."""
         candidates: list[VideoInfo] = []
         scan_limit = max(options.search_limit, options.search_scan_limit)
         scan_limit = max(1, min(500, scan_limit))
@@ -185,6 +188,7 @@ class DownloaderEngine:
             clean_query = query.strip()
             if not clean_query:
                 continue
+            translated_query = self.translate_keyword(clean_query, options.search_language)
             command = [
                 str(self.ytdlp),
                 "--dump-single-json",
@@ -197,30 +201,56 @@ class DownloaderEngine:
             command += self._javascript_options()
             if cookies_file and cookies_file.is_file():
                 command += ["--cookies", str(cookies_file)]
-            command.append(f"ytsearch{scan_limit}:{clean_query}")
+            if options.search_platform == "Douyin":
+                search_url = (
+                    "https://www.douyin.com/search/"
+                    + urllib.parse.quote(translated_query, safe="")
+                    + "?type=video"
+                )
+                command += ["--playlist-end", str(scan_limit)]
+                command.append(search_url)
+            else:
+                command.append(f"ytsearch{scan_limit}:{translated_query}")
             try:
                 result = self._run_capture(command, timeout=300)
             except FileNotFoundError as exc:
                 raise DownloaderError("Không tìm thấy yt-dlp trong gói ứng dụng.") from exc
             except subprocess.TimeoutExpired as exc:
-                raise DownloaderError("Quá thời gian tìm kiếm video YouTube.") from exc
+                raise DownloaderError(
+                    f"Quá thời gian tìm kiếm video {options.search_platform or 'YouTube'}."
+                ) from exc
             if result.returncode != 0 and "no such option: --flat-playlist" in (
                 (result.stderr or result.stdout or "").lower()
             ):
                 command.remove("--flat-playlist")
                 result = self._run_capture(command, timeout=300)
             if result.returncode != 0:
-                raise DownloaderError(self._friendly_error(result.stderr or result.stdout))
+                message = self._friendly_error(result.stderr or result.stdout)
+                if options.search_platform == "Douyin":
+                    message = (
+                        "Douyin chưa trả về kết quả tìm kiếm. Hãy thêm cookies.txt của tài khoản "
+                        "Douyin trong Cài đặt rồi thử lại. Chi tiết: " + message
+                    )
+                raise DownloaderError(message)
             try:
                 payload = json.loads(result.stdout)
             except json.JSONDecodeError as exc:
-                raise DownloaderError("YouTube trả về dữ liệu tìm kiếm không hợp lệ.") from exc
+                raise DownloaderError(
+                    f"{options.search_platform or 'YouTube'} trả về dữ liệu tìm kiếm không hợp lệ."
+                ) from exc
             for entry in payload.get("entries") or []:
                 if entry:
+                    entry = dict(entry)
+                    entry["search_query_original"] = clean_query
+                    entry["search_query_translated"] = translated_query
                     candidates.append(
                         self._video_from_json(
                             entry,
-                            fallback_url=f"ytsearch:{clean_query}",
+                            fallback_url=(
+                                f"douyinsearch:{translated_query}"
+                                if options.search_platform == "Douyin"
+                                else f"ytsearch:{translated_query}"
+                            ),
                             playlist=payload,
                         )
                     )
@@ -241,6 +271,29 @@ class DownloaderEngine:
                 reverse=True,
             )
         return filtered[: max(1, options.search_limit)]
+
+    @staticmethod
+    def translate_keyword(query: str, target_language: str) -> str:
+        """Translate a search query without an API key, falling back to the original."""
+        target = {"zh-cn": "zh-CN", "zh-tw": "zh-TW"}.get(target_language.lower())
+        if not target:
+            return query
+        params = urllib.parse.urlencode(
+            {"client": "gtx", "sl": "auto", "tl": target, "dt": "t", "q": query}
+        )
+        request = urllib.request.Request(
+            "https://translate.googleapis.com/translate_a/single?" + params,
+            headers={"User-Agent": "Mozilla/5.0 LinkGrabStudio/1.3"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            translated = "".join(
+                str(part[0]) for part in (payload[0] or []) if part and part[0]
+            ).strip()
+            return translated or query
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, urllib.error.URLError):
+            return query
 
     def download(
         self,
@@ -332,6 +385,8 @@ class DownloaderEngine:
             str(options.output_dir / "%(title).180B [%(id)s].%(ext)s"),
             "--yes-playlist" if options.playlist else "--no-playlist",
         ]
+        if options.overwrite_existing:
+            command.append("--force-overwrites")
         command += self._javascript_options()
         ffmpeg_path = Path(str(self.ffmpeg))
         if ffmpeg_path.is_file():
@@ -393,6 +448,8 @@ class DownloaderEngine:
         extractor = str(data.get("extractor_key") or data.get("extractor") or "")
         if "youtube" in extractor.lower() and not webpage_url.startswith(("http://", "https://")):
             webpage_url = f"https://www.youtube.com/watch?v={video_id}"
+        if "douyin" in extractor.lower() and "douyin.com" not in webpage_url.lower():
+            webpage_url = f"https://www.douyin.com/video/{video_id}"
         return VideoInfo(
             url=fallback_url,
             video_id=video_id,
