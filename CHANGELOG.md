@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2
+
+- Sửa trình cập nhật có thể ghi đè nhầm một bản LinkGrab Studio khác trên máy.
+- Khi không truyền đường dẫn, trình cập nhật sẽ yêu cầu chọn đúng thư mục chứa `LinkGrabStudio.exe`.
+- Hiển thị rõ phiên bản 1.1.2 và chỉ dẫn mở chế độ Theo kênh.
+
 ## 1.1.1
 
 - Sửa lỗi cú pháp dấu ngoặc kép trong trình cập nhật PowerShell.

@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 APP_NAME = "LinkGrab Studio"
+APP_VERSION = "1.1.2"
 APP_DIR_NAME = "LinkGrabStudio"
 
 
@@ -54,4 +55,3 @@ class AppSettings:
         temp = path.with_suffix(".tmp")
         temp.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(path)
-

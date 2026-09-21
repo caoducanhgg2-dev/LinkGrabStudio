@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .config import APP_NAME, AppSettings, app_data_dir
+from .config import APP_NAME, APP_VERSION, AppSettings, app_data_dir
 from .database import HistoryDatabase
 from .downloader import DownloaderEngine
 from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions, VideoInfo
@@ -120,13 +120,21 @@ class DownloadPage(QWidget):
             self.mode_group.addButton(button)
             mode_row.addWidget(button)
         self.link_mode.setChecked(True)
-        self.channel_mode = QPushButton("👤 Theo kênh")
+        self.channel_mode = QPushButton("👤 Theo kênh • MỚI")
         self.channel_mode.setObjectName("mode")
         self.channel_mode.setCheckable(True)
         self.mode_group.addButton(self.channel_mode)
         mode_row.addWidget(self.channel_mode)
         mode_row.addStretch()
         form.addLayout(mode_row)
+
+        channel_hint = QLabel(
+            "MỚI 1.1: Bấm “Theo kênh” để lọc 1–300 video theo lượt xem, "
+            "ngày đăng và tự loại video đã tải."
+        )
+        channel_hint.setObjectName("countBadge")
+        channel_hint.setWordWrap(True)
+        form.addWidget(channel_hint)
 
         self.link_mode.clicked.connect(self._update_mode_ui)
         self.playlist_mode.clicked.connect(self._update_mode_ui)
@@ -586,7 +594,7 @@ class MainWindow(QMainWindow):
         self.preview_pool = QThreadPool(self)
         self.preview_pool.setMaxThreadCount(1)
         self.queue = QueueController(self.engine, self.database, self.settings.concurrency)
-        self.setWindowTitle(f"{APP_NAME} 1.1")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Kênh + chống trùng")
         self.resize(1450, 890)
         self.setMinimumSize(1100, 700)
         self.setStyleSheet(APP_STYLE)
@@ -626,7 +634,7 @@ class MainWindow(QMainWindow):
             if index == 0:
                 button.setChecked(True)
         side_layout.addStretch()
-        version = QLabel("Bản 1.1\nWindows 10/11")
+        version = QLabel(f"Bản {APP_VERSION}\nKênh + chống trùng\nWindows 10/11")
         version.setObjectName("muted")
         side_layout.addWidget(version)
         root.addWidget(sidebar)

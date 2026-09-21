@@ -35,12 +35,12 @@ jobs:
 
       - name: Create small update ZIP
         shell: powershell
-        run: .\build\make_update_patch.ps1 -Version "1.1.1"
+        run: .\build\make_update_patch.ps1 -Version "1.1.2"
 
       - uses: actions/upload-artifact@v4
         with:
           name: LinkGrabStudio-Update-1.1
           path: |
-            dist/LinkGrabStudio_Update_1.1.1.zip
+            dist/LinkGrabStudio_Update_1.1.2.zip
             dist/SHA256SUMS_UPDATE.txt
           if-no-files-found: error

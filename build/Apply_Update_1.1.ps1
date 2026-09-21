@@ -9,9 +9,25 @@ $PackageRoot = $PSScriptRoot
 $PayloadExe = Join-Path $PackageRoot "payload\LinkGrabStudio.exe"
 $ManifestPath = Join-Path $PackageRoot "manifest.json"
 
-function Show-Message([string]$Text, [string]$Title = "LinkGrab Studio 1.1") {
+function Show-Message([string]$Text, [string]$Title = "LinkGrab Studio 1.1.2") {
     Add-Type -AssemblyName PresentationFramework
     [System.Windows.MessageBox]::Show($Text, $Title) | Out-Null
+}
+
+function Select-InstallDirectory {
+    Add-Type -AssemblyName System.Windows.Forms
+    $Dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $Dialog.Description = "Chon dung thu muc dang chua LinkGrabStudio.exe ma ban thuong mo."
+    $Dialog.ShowNewFolderButton = $false
+    $DefaultDir = Join-Path $env:LOCALAPPDATA "Programs\LinkGrabStudio"
+    if (Test-Path (Join-Path $DefaultDir "LinkGrabStudio.exe")) {
+        $Dialog.SelectedPath = $DefaultDir
+    }
+    $Result = $Dialog.ShowDialog()
+    if ($Result -ne [System.Windows.Forms.DialogResult]::OK) {
+        throw "Ban chua chon thu muc cai dat. Khong co file nao bi thay doi."
+    }
+    return $Dialog.SelectedPath
 }
 
 try {
@@ -26,17 +42,22 @@ try {
     }
 
     if (-not $InstallDir) {
-        $Candidates = @(
-            (Join-Path $env:LOCALAPPDATA "Programs\LinkGrabStudio"),
-            (Split-Path -Parent $PackageRoot),
-            $PackageRoot
-        )
-        $InstallDir = $Candidates |
-            Where-Object { Test-Path (Join-Path $_ "LinkGrabStudio.exe") } |
-            Select-Object -First 1
+        $InstallDir = Select-InstallDirectory
     }
     if (-not $InstallDir -or -not (Test-Path (Join-Path $InstallDir "LinkGrabStudio.exe"))) {
-        throw 'Khong tim thay LinkGrabStudio.exe. Hay chay: CapNhat_1.1.cmd "D:\duong-dan\LinkGrabStudio"'
+        throw "Thu muc da chon khong co LinkGrabStudio.exe. Hay chay lai va chon dung thu muc."
+    }
+
+    $InstallDir = (Resolve-Path $InstallDir).Path
+    Add-Type -AssemblyName PresentationFramework
+    $Confirm = [System.Windows.MessageBox]::Show(
+        "Se cap nhat dung file tai:`n$InstallDir\LinkGrabStudio.exe`n`nNhan Yes de tiep tuc.",
+        "Xac nhan LinkGrab Studio 1.1.2",
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Question
+    )
+    if ($Confirm -ne [System.Windows.MessageBoxResult]::Yes) {
+        throw "Da huy cap nhat. Khong co file nao bi thay doi."
     }
 
     if (Get-Process -Name "LinkGrabStudio" -ErrorAction SilentlyContinue) {
@@ -71,7 +92,7 @@ try {
         throw "Cap nhat that bai; ban cu da duoc khoi phuc tu dong. Chi tiet: $($_.Exception.Message)"
     }
 
-    Show-Message "Cap nhat LinkGrab Studio 1.1 thanh cong.`n`nLich su tai va du lieu chong trung duoc giu nguyen."
+    Show-Message "Cap nhat LinkGrab Studio 1.1.2 thanh cong.`n`nFile da cap nhat:`n$TargetExe`n`nLich su tai va du lieu chong trung duoc giu nguyen." "LinkGrab Studio 1.1.2"
     Start-Process $TargetExe
 } catch {
     Show-Message $_.Exception.Message "Khong the cap nhat LinkGrab Studio"

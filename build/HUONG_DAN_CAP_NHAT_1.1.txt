@@ -1,10 +1,13 @@
-LINKGRAB STUDIO 1.1 - GOI CAP NHAT NHO
+LINKGRAB STUDIO 1.1.2 - GOI CAP NHAT NHO
 
 1. Dong hoan toan LinkGrab Studio.
 2. Giai nen TOAN BO file ZIP vao mot thu muc rieng.
 3. Chay CapNhat_1.1.cmd.
-4. Neu ung dung dang nam o vi tri khac, keo thu muc cai dat vao file CMD
-   hoac chay: CapNhat_1.1.cmd "D:\duong-dan\LinkGrabStudio"
+4. Chon DUNG thu muc chua LinkGrabStudio.exe ma ban van thuong mo.
+5. Kiem tra duong dan hien tren hop xac nhan, sau do bam Yes.
+
+Neu da biet chinh xac thu muc, co the chay:
+CapNhat_1.1.cmd "D:\duong-dan\LinkGrabStudio"
 
 Trinh cap nhat chi thay file chuong trinh da thay doi.
 Lich su tai va danh sach chong trung trong LOCALAPPDATA duoc giu nguyen.
