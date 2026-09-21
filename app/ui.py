@@ -88,12 +88,14 @@ class DownloadPage(QWidget):
         platform_row.addWidget(QLabel("Chọn nền tảng"))
         self.platform_group = QButtonGroup(self)
         self.platform_group.setExclusive(True)
+        self.platform_buttons: dict[str, QPushButton] = {}
         for index, (label, icon) in enumerate((("YouTube", "▶"), ("TikTok", "♪"), ("Douyin", "◉"))):
             button = QPushButton(f"{icon}  {label}")
             button.setObjectName("platform")
             button.setCheckable(True)
             button.setChecked(index == 0)
             self.platform_group.addButton(button)
+            self.platform_buttons[label] = button
             platform_row.addWidget(button)
         more = QPushButton("＋ Nền tảng khác (sắp có)")
         more.setObjectName("platform")
@@ -113,9 +115,10 @@ class DownloadPage(QWidget):
         mode_row.addWidget(QLabel("Chế độ"))
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
+        self.keyword_mode = QPushButton("🔍 Theo từ khóa • MỚI")
         self.link_mode = QPushButton("🔗 Theo link")
         self.playlist_mode = QPushButton("▤ Playlist/Bộ")
-        for button in (self.link_mode, self.playlist_mode):
+        for button in (self.keyword_mode, self.link_mode, self.playlist_mode):
             button.setObjectName("mode")
             button.setCheckable(True)
             self.mode_group.addButton(button)
@@ -130,13 +133,14 @@ class DownloadPage(QWidget):
         form.addLayout(mode_row)
 
         channel_hint = QLabel(
-            "MỚI 1.1: Bấm “Theo kênh” để lọc 1–300 video theo lượt xem, "
+            "MỚI 1.2: Tìm video YouTube theo từ khóa; lọc 1–300 video theo lượt xem, "
             "ngày đăng và tự loại video đã tải."
         )
         channel_hint.setObjectName("countBadge")
         channel_hint.setWordWrap(True)
         form.addWidget(channel_hint)
 
+        self.keyword_mode.clicked.connect(self._update_mode_ui)
         self.link_mode.clicked.connect(self._update_mode_ui)
         self.playlist_mode.clicked.connect(self._update_mode_ui)
         self.channel_mode.clicked.connect(self._update_mode_ui)
@@ -188,6 +192,40 @@ class DownloadPage(QWidget):
         channel_grid.addWidget(self.channel_duplicate_note, 2, 0, 1, 3)
         self.channel_filters.setVisible(False)
         form.addWidget(self.channel_filters)
+
+        self.search_filters = QFrame()
+        search_grid = QGridLayout(self.search_filters)
+        search_grid.setContentsMargins(0, 6, 0, 6)
+        search_grid.addWidget(QLabel("Số video"), 0, 0)
+        search_grid.addWidget(QLabel("Sắp xếp"), 0, 1)
+        search_grid.addWidget(QLabel("Khoảng thời gian"), 0, 2)
+        self.search_limit = QSpinBox()
+        self.search_limit.setRange(1, 300)
+        self.search_limit.setValue(50)
+        self.search_sort = QComboBox()
+        self.search_sort.addItem("Nhiều lượt xem nhất", "views")
+        self.search_sort.addItem("Mới nhất", "newest")
+        self.search_sort.addItem("Liên quan nhất", "relevance")
+        self.search_period = QComboBox()
+        for label, days in (
+            ("Không giới hạn", 0),
+            ("Trong 1 tuần", 7),
+            ("Trong 1 tháng", 30),
+            ("Trong 3 tháng", 90),
+            ("Trong 6 tháng", 180),
+            ("Trong 1 năm", 365),
+        ):
+            self.search_period.addItem(label, days)
+        search_grid.addWidget(self.search_limit, 1, 0)
+        search_grid.addWidget(self.search_sort, 1, 1)
+        search_grid.addWidget(self.search_period, 1, 2)
+        search_note = QLabel(
+            "YouTube sẽ tìm rộng hơn số lượng yêu cầu, sau đó app lọc và xếp hạng kết quả tốt nhất."
+        )
+        search_note.setObjectName("muted")
+        search_grid.addWidget(search_note, 2, 0, 1, 3)
+        self.search_filters.setVisible(False)
+        form.addWidget(self.search_filters)
 
         filters = QGridLayout()
         filters.addWidget(QLabel("Chất lượng"), 0, 0)
@@ -277,6 +315,9 @@ class DownloadPage(QWidget):
     def current_urls(self) -> list[str]:
         return extract_urls(self.url_input.toPlainText())
 
+    def current_queries(self) -> list[str]:
+        return [line.strip() for line in self.url_input.toPlainText().splitlines() if line.strip()]
+
     def current_options(self) -> DownloadOptions:
         cookies = Path(self.settings.cookies_file) if self.settings.cookies_file else None
         return DownloadOptions(
@@ -291,14 +332,21 @@ class DownloadPage(QWidget):
         )
 
     def current_preview_options(self) -> PreviewOptions:
-        limit = self.channel_limit.value()
+        channel_limit = self.channel_limit.value()
+        search_limit = self.search_limit.value()
+        is_search = self.keyword_mode.isChecked()
         return PreviewOptions(
             playlist=self.playlist_mode.isChecked(),
             channel=self.channel_mode.isChecked(),
-            channel_limit=limit,
-            channel_scan_limit=max(100, min(500, limit * 5)),
-            sort_by=str(self.channel_sort.currentData()),
-            since_days=int(self.channel_period.currentData()),
+            keyword_search=is_search,
+            channel_limit=channel_limit,
+            channel_scan_limit=max(100, min(500, channel_limit * 5)),
+            search_limit=search_limit,
+            search_scan_limit=max(50, min(500, search_limit * 5)),
+            sort_by=str(self.search_sort.currentData() if is_search else self.channel_sort.currentData()),
+            since_days=int(
+                self.search_period.currentData() if is_search else self.channel_period.currentData()
+            ),
             skip_duplicates=self.settings.skip_duplicates,
         )
 
@@ -372,12 +420,13 @@ class DownloadPage(QWidget):
         if not self.videos and self._preview_errors:
             QMessageBox.warning(
                 self,
-                "Không đọc được kênh",
+                "Không đọc được video",
                 "Không tìm thấy video nào.\n\n" + self._preview_errors[0],
             )
         if self._auto_queue_after_preview:
             self._auto_queue_after_preview = False
-            self._queue_selected()
+            if self.videos:
+                self._queue_selected()
 
     def set_busy(self, busy: bool) -> None:
         self.preview_button.setEnabled(not busy)
@@ -385,15 +434,19 @@ class DownloadPage(QWidget):
         self.preview_button.setText("⏳  Đang đọc thông tin…" if busy else "👁  Xem trước && chọn")
 
     def _request_preview(self, auto_queue: bool) -> None:
-        urls = self.current_urls()
-        if not urls:
-            QMessageBox.warning(self, APP_NAME, "Hãy dán ít nhất một link hợp lệ.")
+        is_search = self.keyword_mode.isChecked()
+        items = self.current_queries() if is_search else self.current_urls()
+        if not items:
+            message = "Hãy nhập ít nhất một từ khóa." if is_search else "Hãy dán ít nhất một link hợp lệ."
+            QMessageBox.warning(self, APP_NAME, message)
             return
         self.clear_preview()
         self._auto_queue_after_preview = auto_queue
         self.set_busy(True)
-        self.append_log(f"Đang kiểm tra {len(urls)} link…")
-        self.preview_requested.emit(urls, self.current_preview_options(), auto_queue)
+        action = "Đang tìm" if is_search else "Đang kiểm tra"
+        unit = "từ khóa" if is_search else "link"
+        self.append_log(f"{action} {len(items)} {unit}…")
+        self.preview_requested.emit(items, self.current_preview_options(), auto_queue)
 
     def _queue_selected(self) -> None:
         selected = self.selected_videos()
@@ -408,6 +461,12 @@ class DownloadPage(QWidget):
             self.output_dir.setText(folder)
 
     def _update_link_summary(self) -> None:
+        if self.keyword_mode.isChecked():
+            queries = self.current_queries()
+            self.link_summary.setText(
+                f"Đã nhập {len(queries)} từ khóa YouTube" if queries else "Chưa có từ khóa"
+            )
+            return
         urls = self.current_urls()
         counts: dict[str, int] = {}
         for url in urls:
@@ -421,8 +480,18 @@ class DownloadPage(QWidget):
 
     def _update_mode_ui(self) -> None:
         is_channel = self.channel_mode.isChecked()
+        is_search = self.keyword_mode.isChecked()
         self.channel_filters.setVisible(is_channel)
-        if is_channel:
+        self.search_filters.setVisible(is_search)
+        for name, button in self.platform_buttons.items():
+            button.setEnabled(not is_search or name == "YouTube")
+        if is_search:
+            self.platform_buttons["YouTube"].setChecked(True)
+            self.url_label.setText("Từ khóa YouTube — mỗi dòng một từ khóa")
+            self.url_input.setPlaceholderText(
+                "Nhập từ khóa cần tìm. Ví dụ:\nmukbang\nbushcraft shelter\nhouse renovation"
+            )
+        elif is_channel:
             self.url_label.setText("Link kênh — mỗi dòng một kênh")
             self.url_input.setPlaceholderText(
                 "Dán link kênh YouTube hoặc trang cá nhân TikTok/Douyin.\n"
@@ -434,6 +503,7 @@ class DownloadPage(QWidget):
                 "Dán link vào đây. Ví dụ:\nhttps://www.youtube.com/watch?v=...\n"
                 "https://www.tiktok.com/@user/video/..."
             )
+        self._update_link_summary()
 
 
 class QueuePage(QWidget):
@@ -603,7 +673,7 @@ class MainWindow(QMainWindow):
         self.preview_pool = QThreadPool(self)
         self.preview_pool.setMaxThreadCount(1)
         self.queue = QueueController(self.engine, self.database, self.settings.concurrency)
-        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Kênh + chống trùng")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Từ khóa + Kênh")
         self.resize(1450, 890)
         self.setMinimumSize(1100, 700)
         self.setStyleSheet(APP_STYLE)
@@ -643,7 +713,7 @@ class MainWindow(QMainWindow):
             if index == 0:
                 button.setChecked(True)
         side_layout.addStretch()
-        version = QLabel(f"Bản {APP_VERSION}\nKênh + chống trùng\nWindows 10/11")
+        version = QLabel(f"Bản {APP_VERSION}\nTừ khóa + Kênh\nWindows 10/11")
         version.setObjectName("muted")
         side_layout.addWidget(version)
         root.addWidget(sidebar)

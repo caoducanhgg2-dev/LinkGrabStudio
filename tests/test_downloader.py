@@ -145,3 +145,88 @@ def test_channel_url_is_normalized_to_videos_tab() -> None:
     )
     existing = "https://www.youtube.com/@example/shorts"
     assert DownloaderEngine._normalize_channel_url(existing) == existing
+
+
+def test_keyword_search_uses_ytsearch_and_sorts_best_views(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "title": "mukbang",
+        "entries": [
+            {
+                "id": "low",
+                "title": "Low views",
+                "url": "low",
+                "extractor_key": "Youtube",
+                "timestamp": int((now - timedelta(days=1)).timestamp()),
+                "view_count": 100,
+            },
+            {
+                "id": "best",
+                "title": "Best views",
+                "url": "best",
+                "extractor_key": "Youtube",
+                "timestamp": int((now - timedelta(days=2)).timestamp()),
+                "view_count": 5000,
+            },
+        ],
+    }
+
+    def fake_run(command, timeout):
+        assert "--flat-playlist" in command
+        assert command[-1] == "ytsearch50:mukbang"
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(engine, "_run_capture", fake_run)
+    videos = engine.preview_search(
+        ["mukbang"],
+        PreviewOptions(
+            keyword_search=True,
+            search_limit=10,
+            search_scan_limit=50,
+            since_days=0,
+            sort_by="views",
+        ),
+    )
+    assert [video.video_id for video in videos] == ["best", "low"]
+    assert videos[0].webpage_url == "https://www.youtube.com/watch?v=best"
+
+
+def test_keyword_search_filters_time_and_normalizes_duplicate_key(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "entries": [
+            {
+                "id": "recent",
+                "title": "Recent",
+                "url": "recent",
+                "extractor_key": "YoutubeSearch",
+                "timestamp": int((now - timedelta(days=2)).timestamp()),
+            },
+            {
+                "id": "old",
+                "title": "Old",
+                "url": "old",
+                "extractor_key": "YoutubeSearch",
+                "timestamp": int((now - timedelta(days=40)).timestamp()),
+            },
+        ]
+    }
+    monkeypatch.setattr(
+        engine,
+        "_run_capture",
+        lambda command, timeout: subprocess.CompletedProcess(command, 0, json.dumps(payload), ""),
+    )
+    videos = engine.preview_search(
+        ["mukbang"],
+        PreviewOptions(
+            keyword_search=True,
+            search_limit=20,
+            search_scan_limit=100,
+            since_days=7,
+            sort_by="newest",
+        ),
+    )
+    assert [video.video_id for video in videos] == ["recent"]
+    assert videos[0].unique_key == "youtube:recent"

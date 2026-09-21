@@ -36,6 +36,10 @@ class VideoInfo:
     @property
     def unique_key(self) -> str:
         source = (self.extractor or self.platform or "unknown").lower()
+        if source.startswith("youtube"):
+            source = "youtube"
+        elif source.startswith("tiktok"):
+            source = "tiktok"
         return f"{source}:{self.video_id}"
 
 
@@ -55,8 +59,11 @@ class DownloadOptions:
 class PreviewOptions:
     playlist: bool = False
     channel: bool = False
+    keyword_search: bool = False
     channel_limit: int = 100
     channel_scan_limit: int = 500
+    search_limit: int = 50
+    search_scan_limit: int = 250
     sort_by: str = "views"
     since_days: int = 365
     skip_duplicates: bool = True

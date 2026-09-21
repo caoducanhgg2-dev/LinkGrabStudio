@@ -30,7 +30,11 @@ class PreviewWorker(QRunnable):
     def run(self) -> None:
         for url in self.urls:
             try:
-                if self.options.channel:
+                if self.options.keyword_search:
+                    videos = self.engine.preview_search(
+                        [url], self.options, cookies_file=self.cookies_file
+                    )
+                elif self.options.channel:
                     videos = self.engine.preview_channel([url], self.options, cookies_file=self.cookies_file)
                 else:
                     videos = self.engine.preview(

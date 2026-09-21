@@ -12,6 +12,7 @@ TikTok và Douyin bằng cách dán một hoặc nhiều đường link.
 - Tải playlist theo lựa chọn rõ ràng.
 - Dán link kênh YouTube/TikTok/Douyin và lấy danh sách video.
 - Lọc video trong 1 tuần, 1 tháng, 3 tháng, 6 tháng hoặc 1 năm.
+- Tìm video YouTube theo từ khóa, chọn 1–300 kết quả và xếp hạng theo lượt xem, độ mới hoặc độ liên quan.
 - Sắp xếp theo lượt xem cao nhất hoặc video mới nhất.
 - Hiển thị lượt xem, ngày đăng và link nguồn trong danh sách xem trước.
 - Hàng đợi tối đa bốn luồng, mặc định hai luồng.

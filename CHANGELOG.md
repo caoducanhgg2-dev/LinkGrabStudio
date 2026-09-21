@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Thêm chế độ tìm video YouTube theo từ khóa, ví dụ `mukbang`.
+- Chọn từ 1 đến 300 kết quả và tìm rộng tối đa 500 video để xếp hạng.
+- Sắp xếp theo nhiều lượt xem nhất, mới nhất hoặc liên quan nhất.
+- Lọc không giới hạn hoặc trong 1 tuần, 1 tháng, 3 tháng, 6 tháng và 1 năm.
+- Giữ nguyên xem trước, link nguồn, lịch sử tải và tự bỏ chọn video trùng.
+
 ## 1.1.3
 
 - Sửa lỗi engine báo `no such option: --extract-flat` khi đọc kênh.

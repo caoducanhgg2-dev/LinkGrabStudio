@@ -67,7 +67,7 @@ try {
     $TargetExe = Join-Path $InstallDir "LinkGrabStudio.exe"
     $DataDir = Join-Path $env:LOCALAPPDATA "LinkGrabStudio"
     $BackupRoot = Join-Path $DataDir "backups"
-    $BackupDir = Join-Path $BackupRoot ("before_1.1_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
+    $BackupDir = Join-Path $BackupRoot ("before_1.2_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
     New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
     Copy-Item $TargetExe (Join-Path $BackupDir "LinkGrabStudio.exe") -Force
 

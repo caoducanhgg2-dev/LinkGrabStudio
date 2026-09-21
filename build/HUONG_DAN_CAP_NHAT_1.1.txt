@@ -1,4 +1,4 @@
-LINKGRAB STUDIO 1.1.3 - GOI CAP NHAT NHO
+LINKGRAB STUDIO 1.2.0 - GOI CAP NHAT NHO
 
 1. Dong hoan toan LinkGrab Studio.
 2. Giai nen TOAN BO file ZIP vao mot thu muc rieng.

@@ -170,6 +170,78 @@ class DownloaderEngine:
             filtered.sort(key=lambda video: (video.view_count or 0, self._video_timestamp(video)), reverse=True)
         return filtered[: max(1, options.channel_limit)]
 
+    def preview_search(
+        self,
+        queries: Iterable[str],
+        options: PreviewOptions,
+        *,
+        cookies_file: Path | None = None,
+    ) -> list[VideoInfo]:
+        """Search YouTube by keyword, then filter, rank and deduplicate results."""
+        candidates: list[VideoInfo] = []
+        scan_limit = max(options.search_limit, options.search_scan_limit)
+        scan_limit = max(1, min(500, scan_limit))
+        for query in queries:
+            clean_query = query.strip()
+            if not clean_query:
+                continue
+            command = [
+                str(self.ytdlp),
+                "--dump-single-json",
+                "--skip-download",
+                "--no-warnings",
+                "--ignore-config",
+                "--yes-playlist",
+                "--flat-playlist",
+            ]
+            command += self._javascript_options()
+            if cookies_file and cookies_file.is_file():
+                command += ["--cookies", str(cookies_file)]
+            command.append(f"ytsearch{scan_limit}:{clean_query}")
+            try:
+                result = self._run_capture(command, timeout=300)
+            except FileNotFoundError as exc:
+                raise DownloaderError("Không tìm thấy yt-dlp trong gói ứng dụng.") from exc
+            except subprocess.TimeoutExpired as exc:
+                raise DownloaderError("Quá thời gian tìm kiếm video YouTube.") from exc
+            if result.returncode != 0 and "no such option: --flat-playlist" in (
+                (result.stderr or result.stdout or "").lower()
+            ):
+                command.remove("--flat-playlist")
+                result = self._run_capture(command, timeout=300)
+            if result.returncode != 0:
+                raise DownloaderError(self._friendly_error(result.stderr or result.stdout))
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise DownloaderError("YouTube trả về dữ liệu tìm kiếm không hợp lệ.") from exc
+            for entry in payload.get("entries") or []:
+                if entry:
+                    candidates.append(
+                        self._video_from_json(
+                            entry,
+                            fallback_url=f"ytsearch:{clean_query}",
+                            playlist=payload,
+                        )
+                    )
+
+        filtered = candidates
+        if options.since_days > 0:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=options.since_days)
+            filtered = [video for video in filtered if self._is_recent(video, cutoff)]
+        unique: dict[str, VideoInfo] = {}
+        for video in filtered:
+            unique.setdefault(video.unique_key, video)
+        filtered = list(unique.values())
+        if options.sort_by == "newest":
+            filtered.sort(key=self._video_timestamp, reverse=True)
+        elif options.sort_by == "views":
+            filtered.sort(
+                key=lambda video: (video.view_count or 0, self._video_timestamp(video)),
+                reverse=True,
+            )
+        return filtered[: max(1, options.search_limit)]
+
     def download(
         self,
         job: DownloadJob,
@@ -319,6 +391,8 @@ class DownloaderEngine:
         video_id = str(data.get("id") or data.get("display_id") or "unknown")
         webpage_url = str(data.get("webpage_url") or data.get("url") or fallback_url)
         extractor = str(data.get("extractor_key") or data.get("extractor") or "")
+        if "youtube" in extractor.lower() and not webpage_url.startswith(("http://", "https://")):
+            webpage_url = f"https://www.youtube.com/watch?v={video_id}"
         return VideoInfo(
             url=fallback_url,
             video_id=video_id,
