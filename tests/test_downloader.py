@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.downloader import DownloaderEngine
-from app.models import DownloadOptions, PreviewOptions
+from app.models import DownloadOptions, PreviewOptions, VideoInfo
 
 
 def test_mp4_command_has_quality_and_safe_output(tmp_path: Path) -> None:
@@ -232,27 +232,29 @@ def test_keyword_search_filters_time_and_normalizes_duplicate_key(monkeypatch) -
     assert videos[0].unique_key == "youtube:recent"
 
 
-def test_douyin_keyword_search_translates_and_builds_search_url(monkeypatch) -> None:
+def test_douyin_keyword_search_uses_indexed_direct_video_urls(monkeypatch) -> None:
     engine = DownloaderEngine()
-    payload = {
-        "entries": [
-            {
-                "id": "729001",
-                "title": "吃播",
-                "url": "https://example.test/media.mp4",
-                "extractor_key": "Douyin",
-                "view_count": 9000,
-            }
-        ]
-    }
-    commands: list[list[str]] = []
     monkeypatch.setattr(engine, "translate_keyword", lambda query, language: "吃播")
-
-    def fake_run(command, timeout):
-        commands.append(list(command))
-        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
-
-    monkeypatch.setattr(engine, "_run_capture", fake_run)
+    monkeypatch.setattr(
+        engine,
+        "_discover_douyin_urls",
+        lambda query, limit: ["https://www.douyin.com/video/729001"],
+    )
+    monkeypatch.setattr(
+        engine,
+        "_preview_douyin_urls",
+        lambda urls, cookies_file=None: [
+            VideoInfo(
+                url=urls[0],
+                video_id="729001",
+                title="吃播",
+                platform="Douyin",
+                webpage_url=urls[0],
+                extractor="Douyin",
+                view_count=9000,
+            )
+        ],
+    )
     videos = engine.preview_search(
         ["mukbang"],
         PreviewOptions(
@@ -265,12 +267,58 @@ def test_douyin_keyword_search_translates_and_builds_search_url(monkeypatch) -> 
             sort_by="views",
         ),
     )
-    assert commands[0][-1] == "https://www.douyin.com/search/%E5%90%83%E6%92%AD?type=video"
     assert videos[0].platform == "Douyin"
     assert videos[0].webpage_url == "https://www.douyin.com/video/729001"
     assert videos[0].unique_key == "douyin:729001"
     assert videos[0].raw["search_query_original"] == "mukbang"
     assert videos[0].raw["search_query_translated"] == "吃播"
+
+
+def test_douyin_discovery_reads_bing_rss_and_normalizes_urls(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    rss = """<?xml version="1.0"?><rss><channel>
+    <item><link>https://www.douyin.com/video/729001?previous_page=search</link></item>
+    <item><link>https://www.douyin.com/video/729002</link></item>
+    </channel></rss>"""
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return rss.encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+    urls = engine._discover_douyin_urls("吃播", 2)
+    assert urls == [
+        "https://www.douyin.com/video/729001",
+        "https://www.douyin.com/video/729002",
+    ]
+
+
+def test_douyin_direct_metadata_uses_dump_json(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    payload = {
+        "id": "729001",
+        "title": "吃播",
+        "webpage_url": "https://www.douyin.com/video/729001",
+        "extractor_key": "Douyin",
+        "view_count": 9000,
+    }
+    commands: list[list[str]] = []
+
+    def fake_run(command, timeout):
+        commands.append(list(command))
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload) + "\n", "")
+
+    monkeypatch.setattr(engine, "_run_capture", fake_run)
+    videos = engine._preview_douyin_urls(["https://www.douyin.com/video/729001"])
+    assert "--dump-json" in commands[0]
+    assert "https://www.douyin.com/search/" not in " ".join(commands[0])
+    assert videos[0].unique_key == "douyin:729001"
 
 
 def test_force_reload_adds_force_overwrites(tmp_path: Path) -> None:

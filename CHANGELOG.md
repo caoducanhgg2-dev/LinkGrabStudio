@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+- Sửa lỗi tìm kiếm Douyin báo `Link này chưa được hỗ trợ`.
+- Không còn đưa trang `/search/` của Douyin trực tiếp cho yt-dlp.
+- Tìm URL video Douyin thật qua chỉ mục web, sau đó dùng yt-dlp đọc metadata từng video.
+- Giữ dịch từ khóa Trung giản thể/phồn thể, lọc thời gian, xếp hạng và chống trùng.
+- Hiển thị thông báo riêng khi không tìm thấy URL hoặc khi metadata cần cookies Douyin.
+
 ## 1.3.0
 
 - Thêm tìm kiếm video Douyin theo từ khóa trong chế độ Theo từ khóa.

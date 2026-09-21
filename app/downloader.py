@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import html
 import os
 import re
 import subprocess
@@ -9,6 +10,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable
@@ -189,6 +191,19 @@ class DownloaderEngine:
             if not clean_query:
                 continue
             translated_query = self.translate_keyword(clean_query, options.search_language)
+            if options.search_platform == "Douyin":
+                urls = self._discover_douyin_urls(translated_query, scan_limit)
+                if not urls:
+                    raise DownloaderError(
+                        "Không tìm thấy URL video Douyin trong chỉ mục tìm kiếm web. "
+                        "Hãy thử từ khóa tiếng Trung khác hoặc giảm bộ lọc thời gian."
+                    )
+                videos = self._preview_douyin_urls(urls, cookies_file=cookies_file)
+                for video in videos:
+                    video.raw["search_query_original"] = clean_query
+                    video.raw["search_query_translated"] = translated_query
+                candidates.extend(videos)
+                continue
             command = [
                 str(self.ytdlp),
                 "--dump-single-json",
@@ -201,43 +216,24 @@ class DownloaderEngine:
             command += self._javascript_options()
             if cookies_file and cookies_file.is_file():
                 command += ["--cookies", str(cookies_file)]
-            if options.search_platform == "Douyin":
-                search_url = (
-                    "https://www.douyin.com/search/"
-                    + urllib.parse.quote(translated_query, safe="")
-                    + "?type=video"
-                )
-                command += ["--playlist-end", str(scan_limit)]
-                command.append(search_url)
-            else:
-                command.append(f"ytsearch{scan_limit}:{translated_query}")
+            command.append(f"ytsearch{scan_limit}:{translated_query}")
             try:
                 result = self._run_capture(command, timeout=300)
             except FileNotFoundError as exc:
                 raise DownloaderError("Không tìm thấy yt-dlp trong gói ứng dụng.") from exc
             except subprocess.TimeoutExpired as exc:
-                raise DownloaderError(
-                    f"Quá thời gian tìm kiếm video {options.search_platform or 'YouTube'}."
-                ) from exc
+                raise DownloaderError("Quá thời gian tìm kiếm video YouTube.") from exc
             if result.returncode != 0 and "no such option: --flat-playlist" in (
                 (result.stderr or result.stdout or "").lower()
             ):
                 command.remove("--flat-playlist")
                 result = self._run_capture(command, timeout=300)
             if result.returncode != 0:
-                message = self._friendly_error(result.stderr or result.stdout)
-                if options.search_platform == "Douyin":
-                    message = (
-                        "Douyin chưa trả về kết quả tìm kiếm. Hãy thêm cookies.txt của tài khoản "
-                        "Douyin trong Cài đặt rồi thử lại. Chi tiết: " + message
-                    )
-                raise DownloaderError(message)
+                raise DownloaderError(self._friendly_error(result.stderr or result.stdout))
             try:
                 payload = json.loads(result.stdout)
             except json.JSONDecodeError as exc:
-                raise DownloaderError(
-                    f"{options.search_platform or 'YouTube'} trả về dữ liệu tìm kiếm không hợp lệ."
-                ) from exc
+                raise DownloaderError("YouTube trả về dữ liệu tìm kiếm không hợp lệ.") from exc
             for entry in payload.get("entries") or []:
                 if entry:
                     entry = dict(entry)
@@ -246,11 +242,7 @@ class DownloaderEngine:
                     candidates.append(
                         self._video_from_json(
                             entry,
-                            fallback_url=(
-                                f"douyinsearch:{translated_query}"
-                                if options.search_platform == "Douyin"
-                                else f"ytsearch:{translated_query}"
-                            ),
+                            fallback_url=f"ytsearch:{translated_query}",
                             playlist=payload,
                         )
                     )
@@ -271,6 +263,115 @@ class DownloaderEngine:
                 reverse=True,
             )
         return filtered[: max(1, options.search_limit)]
+
+    def _discover_douyin_urls(self, query: str, limit: int) -> list[str]:
+        """Find indexed Douyin video URLs without sending a search page to yt-dlp."""
+        wanted = max(1, min(300, limit))
+        found: list[str] = []
+        seen: set[str] = set()
+        search_text = f"site:douyin.com/video {query}"
+        providers: list[tuple[str, str]] = []
+        for first in range(1, wanted + 1, 50):
+            params = urllib.parse.urlencode(
+                {"q": search_text, "format": "rss", "count": "50", "first": str(first)}
+            )
+            providers.append(("https://www.bing.com/search?" + params, "rss"))
+        ddg_params = urllib.parse.urlencode({"q": search_text})
+        providers.append(("https://html.duckduckgo.com/html/?" + ddg_params, "html"))
+
+        for url, provider_type in providers:
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    body = response.read().decode("utf-8", errors="replace")
+            except (OSError, urllib.error.URLError):
+                continue
+
+            candidates: list[str] = []
+            if provider_type == "rss":
+                try:
+                    root = ET.fromstring(body)
+                    candidates.extend(
+                        (node.text or "").strip() for node in root.findall(".//item/link")
+                    )
+                except ET.ParseError:
+                    pass
+            decoded = html.unescape(urllib.parse.unquote(body))
+            candidates.extend(
+                re.findall(r"https?://(?:www\.)?douyin\.com/video/\d+", decoded)
+            )
+            for candidate in candidates:
+                normalized = self._normalize_douyin_video_url(candidate)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                found.append(normalized)
+                if len(found) >= wanted:
+                    return found
+        return found
+
+    def _preview_douyin_urls(
+        self,
+        urls: list[str],
+        *,
+        cookies_file: Path | None = None,
+    ) -> list[VideoInfo]:
+        """Read metadata from direct Douyin video URLs in small batches."""
+        videos: list[VideoInfo] = []
+        errors: list[str] = []
+        for offset in range(0, len(urls), 20):
+            batch = urls[offset : offset + 20]
+            command = [
+                str(self.ytdlp),
+                "--dump-json",
+                "--skip-download",
+                "--no-warnings",
+                "--ignore-config",
+                "--no-playlist",
+                "--ignore-errors",
+            ]
+            command += self._javascript_options()
+            if cookies_file and cookies_file.is_file():
+                command += ["--cookies", str(cookies_file)]
+            command += batch
+            try:
+                result = self._run_capture(command, timeout=300)
+            except FileNotFoundError as exc:
+                raise DownloaderError("Không tìm thấy yt-dlp trong gói ứng dụng.") from exc
+            except subprocess.TimeoutExpired:
+                errors.append("Quá thời gian đọc metadata Douyin.")
+                continue
+            for line in result.stdout.splitlines():
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(entry, dict) and entry.get("id"):
+                    fallback = str(entry.get("webpage_url") or batch[0])
+                    videos.append(self._video_from_json(entry, fallback_url=fallback))
+            if result.returncode != 0 and result.stderr:
+                errors.append(self._friendly_error(result.stderr))
+        if not videos:
+            detail = errors[0] if errors else "Douyin không trả về metadata video."
+            raise DownloaderError(
+                "Đã tìm thấy link Douyin nhưng không đọc được video. "
+                "Hãy thêm cookies.txt Douyin trong Cài đặt rồi thử lại. Chi tiết: " + detail
+            )
+        return videos
+
+    @staticmethod
+    def _normalize_douyin_video_url(url: str) -> str:
+        match = re.search(r"douyin\.com/video/(\d+)", url)
+        return f"https://www.douyin.com/video/{match.group(1)}" if match else ""
 
     @staticmethod
     def translate_keyword(query: str, target_language: str) -> str:
