@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3
+
+- Sửa lỗi engine báo `no such option: --extract-flat` khi đọc kênh.
+- Dùng tham số `--flat-playlist` tương thích với yt-dlp chính thức.
+- Tự thử lại bằng chế độ đọc đầy đủ nếu engine cũ không hỗ trợ `--flat-playlist`.
+
 ## 1.1.2
 
 - Sửa trình cập nhật có thể ghi đè nhầm một bản LinkGrab Studio khác trên máy.

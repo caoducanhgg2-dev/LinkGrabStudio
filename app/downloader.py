@@ -126,7 +126,7 @@ class DownloaderEngine:
                 "--no-warnings",
                 "--ignore-config",
                 "--yes-playlist",
-                "--extract-flat",
+                "--flat-playlist",
                 "--playlist-end",
                 str(max(options.channel_limit, options.channel_scan_limit)),
             ]
@@ -140,6 +140,13 @@ class DownloaderEngine:
                 raise DownloaderError("Không tìm thấy yt-dlp trong gói ứng dụng.") from exc
             except subprocess.TimeoutExpired as exc:
                 raise DownloaderError("Quá thời gian đọc danh sách video của kênh.") from exc
+            if result.returncode != 0 and "no such option: --flat-playlist" in (
+                (result.stderr or result.stdout or "").lower()
+            ):
+                # Very old or vendor-modified engines may not expose the flat
+                # playlist switch. Full extraction is slower but still works.
+                command.remove("--flat-playlist")
+                result = self._run_capture(command, timeout=300)
             if result.returncode != 0:
                 raise DownloaderError(self._friendly_error(result.stderr or result.stdout))
             try:

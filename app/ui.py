@@ -61,6 +61,7 @@ class DownloadPage(QWidget):
         super().__init__()
         self.settings = settings
         self.videos: list[VideoInfo] = []
+        self._preview_errors: list[str] = []
         self._auto_queue_after_preview = False
         self._setup_ui()
 
@@ -311,6 +312,7 @@ class DownloadPage(QWidget):
 
     def clear_preview(self) -> None:
         self.videos.clear()
+        self._preview_errors.clear()
         self.preview_table.setRowCount(0)
         self.preview_count.setText("0 video")
 
@@ -357,6 +359,7 @@ class DownloadPage(QWidget):
         self.preview_count.setText(f"{len(self.videos)} video{suffix}")
 
     def add_preview_error(self, url: str, error: str) -> None:
+        self._preview_errors.append(error)
         self.append_log(f"Không thể đọc {url}: {error}")
 
     def append_log(self, message: str) -> None:
@@ -366,6 +369,12 @@ class DownloadPage(QWidget):
     def preview_finished(self) -> None:
         self.set_busy(False)
         self.append_log(f"Đã đọc xong {len(self.videos)} video.")
+        if not self.videos and self._preview_errors:
+            QMessageBox.warning(
+                self,
+                "Không đọc được kênh",
+                "Không tìm thấy video nào.\n\n" + self._preview_errors[0],
+            )
         if self._auto_queue_after_preview:
             self._auto_queue_after_preview = False
             self._queue_selected()

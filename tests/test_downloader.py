@@ -66,7 +66,8 @@ def test_channel_preview_filters_period_and_sorts_by_views(monkeypatch) -> None:
     }
 
     def fake_run(command, timeout):
-        assert "--extract-flat" in command
+        assert "--flat-playlist" in command
+        assert "--extract-flat" not in command
         return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
 
     monkeypatch.setattr(engine, "_run_capture", fake_run)
@@ -103,6 +104,38 @@ def test_channel_preview_limits_results_and_sorts_newest(monkeypatch) -> None:
         PreviewOptions(channel=True, channel_limit=2, since_days=365, sort_by="newest"),
     )
     assert [video.video_id for video in videos] == ["1", "2"]
+
+
+def test_channel_preview_retries_without_flat_option(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    commands: list[list[str]] = []
+    payload = {
+        "entries": [
+            {
+                "id": "fallback",
+                "title": "Fallback works",
+                "webpage_url": "https://youtube.com/watch?v=fallback",
+                "extractor_key": "Youtube",
+                "timestamp": int(datetime.now(timezone.utc).timestamp()),
+            }
+        ]
+    }
+
+    def fake_run(command, timeout):
+        commands.append(list(command))
+        if "--flat-playlist" in command:
+            return subprocess.CompletedProcess(command, 2, "", "no such option: --flat-playlist")
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(engine, "_run_capture", fake_run)
+    videos = engine.preview_channel(
+        ["https://youtube.com/@test/videos"],
+        PreviewOptions(channel=True, channel_limit=10, since_days=365, sort_by="newest"),
+    )
+    assert [video.video_id for video in videos] == ["fallback"]
+    assert len(commands) == 2
+    assert "--flat-playlist" in commands[0]
+    assert "--flat-playlist" not in commands[1]
 
 
 def test_channel_url_is_normalized_to_videos_tab() -> None:

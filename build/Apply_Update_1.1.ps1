@@ -9,7 +9,7 @@ $PackageRoot = $PSScriptRoot
 $PayloadExe = Join-Path $PackageRoot "payload\LinkGrabStudio.exe"
 $ManifestPath = Join-Path $PackageRoot "manifest.json"
 
-function Show-Message([string]$Text, [string]$Title = "LinkGrab Studio 1.1.2") {
+function Show-Message([string]$Text, [string]$Title = "LinkGrab Studio Update") {
     Add-Type -AssemblyName PresentationFramework
     [System.Windows.MessageBox]::Show($Text, $Title) | Out-Null
 }
@@ -52,7 +52,7 @@ try {
     Add-Type -AssemblyName PresentationFramework
     $Confirm = [System.Windows.MessageBox]::Show(
         "Se cap nhat dung file tai:`n$InstallDir\LinkGrabStudio.exe`n`nNhan Yes de tiep tuc.",
-        "Xac nhan LinkGrab Studio 1.1.2",
+        "Xac nhan LinkGrab Studio $($Manifest.version)",
         [System.Windows.MessageBoxButton]::YesNo,
         [System.Windows.MessageBoxImage]::Question
     )
@@ -92,7 +92,7 @@ try {
         throw "Cap nhat that bai; ban cu da duoc khoi phuc tu dong. Chi tiet: $($_.Exception.Message)"
     }
 
-    Show-Message "Cap nhat LinkGrab Studio 1.1.2 thanh cong.`n`nFile da cap nhat:`n$TargetExe`n`nLich su tai va du lieu chong trung duoc giu nguyen." "LinkGrab Studio 1.1.2"
+    Show-Message "Cap nhat LinkGrab Studio $($Manifest.version) thanh cong.`n`nFile da cap nhat:`n$TargetExe`n`nLich su tai va du lieu chong trung duoc giu nguyen." "LinkGrab Studio $($Manifest.version)"
     Start-Process $TargetExe
 } catch {
     Show-Message $_.Exception.Message "Khong the cap nhat LinkGrab Studio"
