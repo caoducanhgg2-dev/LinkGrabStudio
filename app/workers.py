@@ -14,7 +14,7 @@ from .updater import EngineUpdater
 
 class DouyinAuthSignals(QObject):
     finished = Signal(object)
-    error = Signal(str)
+    error = Signal(object)
 
 
 class DouyinAuthWorker(QRunnable):
@@ -29,9 +29,14 @@ class DouyinAuthWorker(QRunnable):
         try:
             self.signals.finished.emit(self.manager.refresh(self.browser))
         except DouyinAuthError as exc:
-            self.signals.error.emit(str(exc))
+            self.signals.error.emit(exc)
         except Exception as exc:
-            self.signals.error.emit(f"Không thể đọc đăng nhập Douyin: {exc}")
+            self.signals.error.emit(
+                DouyinAuthError(
+                    f"Không thể đọc đăng nhập Douyin: {exc}",
+                    code="unexpected",
+                )
+            )
 
 
 class PreviewSignals(QObject):

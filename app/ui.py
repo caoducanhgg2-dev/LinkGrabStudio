@@ -960,6 +960,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _refresh_douyin_auth(self, browser: str) -> None:
+        self._douyin_refresh_browser = browser
         self.settings.douyin_browser = browser
         self.settings_page.set_douyin_busy(True)
         worker = DouyinAuthWorker(self.douyin_auth, browser)
@@ -976,11 +977,38 @@ class MainWindow(QMainWindow):
         self.settings_page.set_douyin_status(status.message)
         QMessageBox.information(self, "Đăng nhập Douyin", status.message)
 
-    @Slot(str)
-    def _douyin_auth_failed(self, error: str) -> None:
+    @Slot(object)
+    def _douyin_auth_failed(self, error) -> None:
         self.settings_page.set_douyin_busy(False)
+        if getattr(error, "code", "") == "browser_locked":
+            browser = getattr(self, "_douyin_refresh_browser", self.settings.douyin_browser)
+            browser_name = "Microsoft Edge" if browser == "edge" else "Google Chrome"
+            message = QMessageBox(self)
+            message.setIcon(QMessageBox.Warning)
+            message.setWindowTitle("Trình duyệt đang khóa cookies")
+            message.setText(f"{browser_name} vẫn còn chạy nền.")
+            message.setInformativeText(
+                "App có thể đóng toàn bộ cửa sổ và tiến trình của trình duyệt rồi tự thử lại. "
+                "Hãy lưu công việc đang mở trong trình duyệt trước khi tiếp tục."
+            )
+            retry_button = message.addButton(
+                f"Đóng {browser_name} và thử lại", QMessageBox.AcceptRole
+            )
+            message.addButton("Hủy", QMessageBox.RejectRole)
+            message.exec()
+            if message.clickedButton() is retry_button:
+                try:
+                    self.douyin_auth.close_browser(browser)
+                except Exception as close_error:
+                    QMessageBox.warning(self, "Đăng nhập Douyin", str(close_error))
+                    return
+                self.settings_page.set_douyin_status(
+                    f"Đã đóng {browser_name}; đang tự động thử lại…"
+                )
+                QTimer.singleShot(1500, lambda: self._refresh_douyin_auth(browser))
+            return
         self.settings_page.set_douyin_status("Chưa đăng nhập Douyin hoặc cookies không đọc được.")
-        QMessageBox.warning(self, "Đăng nhập Douyin", error)
+        QMessageBox.warning(self, "Đăng nhập Douyin", str(error))
 
     def _check_engine(self) -> None:
         if self.engine.is_ready:

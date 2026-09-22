@@ -76,3 +76,23 @@ def test_refresh_rejects_browser_without_login(monkeypatch, tmp_path: Path) -> N
     with pytest.raises(DouyinAuthError, match="đăng nhập Douyin"):
         manager.refresh("edge")
     assert not (tmp_path / "douyin_browser_cookies.txt").exists()
+
+
+def test_refresh_marks_locked_browser_for_ui_retry(monkeypatch, tmp_path: Path) -> None:
+    class LockedEngine(FakeEngine):
+        def _run_capture(self, command: list[str], timeout: int):
+            self.commands.append(command)
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                "",
+                "ERROR: Could not copy Chrome cookie database. Database is locked",
+            )
+
+    manager = DouyinAuthManager(LockedEngine(""))
+    monkeypatch.setattr(auth, "app_data_dir", lambda: tmp_path)
+
+    with pytest.raises(DouyinAuthError) as captured:
+        manager.refresh("chrome")
+    assert captured.value.code == "browser_locked"
+    assert "chạy nền" in str(captured.value)

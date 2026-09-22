@@ -12,7 +12,9 @@ from .config import app_data_dir
 
 
 class DouyinAuthError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str = "unknown") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +101,10 @@ class DouyinAuthManager:
     def refresh(self, browser: str) -> DouyinAuthStatus:
         browser = browser.lower().strip()
         if browser not in {"chrome", "edge"}:
-            raise DouyinAuthError("Chỉ hỗ trợ Google Chrome hoặc Microsoft Edge.")
+            raise DouyinAuthError(
+                "Chỉ hỗ trợ Google Chrome hoặc Microsoft Edge.",
+                code="invalid_browser",
+            )
 
         target = self.cookie_file
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +112,10 @@ class DouyinAuthManager:
         try:
             temp.unlink(missing_ok=True)
         except OSError as exc:
-            raise DouyinAuthError(f"Không thể chuẩn bị tệp cookies tạm: {exc}") from exc
+            raise DouyinAuthError(
+                f"Không thể chuẩn bị tệp cookies tạm: {exc}",
+                code="cookie_write",
+            ) from exc
 
         try:
             urls = self.engine._discover_douyin_urls("热门", 1)
@@ -128,33 +136,69 @@ class DouyinAuthManager:
         try:
             result = self.engine._run_capture(command, timeout=120)
         except FileNotFoundError as exc:
-            raise DouyinAuthError("Không tìm thấy yt-dlp trong gói ứng dụng.") from exc
+            raise DouyinAuthError(
+                "Không tìm thấy yt-dlp trong gói ứng dụng.",
+                code="engine_missing",
+            ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise DouyinAuthError("Quá thời gian đọc đăng nhập từ trình duyệt.") from exc
+            raise DouyinAuthError(
+                "Quá thời gian đọc đăng nhập từ trình duyệt.",
+                code="timeout",
+            ) from exc
 
         imported = self.status(temp)
         if imported.code == "logged_in":
             try:
                 temp.replace(target)
             except OSError as exc:
-                raise DouyinAuthError(f"Không thể lưu phiên đăng nhập Douyin: {exc}") from exc
+                raise DouyinAuthError(
+                    f"Không thể lưu phiên đăng nhập Douyin: {exc}",
+                    code="cookie_write",
+                ) from exc
             return self.status(target)
 
         temp.unlink(missing_ok=True)
         detail = (result.stderr or result.stdout or "").strip()
         lowered = detail.lower()
         if "could not copy chrome cookie database" in lowered or "database is locked" in lowered:
-            detail = "Hãy đóng hoàn toàn trình duyệt rồi thử lại."
-        elif "decrypt" in lowered or "dpapi" in lowered:
-            detail = (
-                "Windows không giải mã được cookies của trình duyệt này. "
-                "Hãy thử Microsoft Edge hoặc cập nhật yt-dlp."
+            raise DouyinAuthError(
+                "Trình duyệt vẫn chạy nền và đang khóa cookies.",
+                code="browser_locked",
             )
-        elif imported.code == "expired":
-            detail = imported.message
-        else:
-            detail = "Hãy đăng nhập Douyin trong trình duyệt đã chọn rồi thử lại."
-        raise DouyinAuthError(detail)
+        if "decrypt" in lowered or "dpapi" in lowered:
+            raise DouyinAuthError(
+                "Windows không giải mã được cookies của trình duyệt này. "
+                "Hãy thử Microsoft Edge hoặc cập nhật yt-dlp.",
+                code="decrypt_failed",
+            )
+        if imported.code == "expired":
+            raise DouyinAuthError(imported.message, code="expired")
+        raise DouyinAuthError(
+            "Hãy đăng nhập Douyin trong trình duyệt đã chọn rồi thử lại.",
+            code="not_logged_in",
+        )
+
+    @staticmethod
+    def close_browser(browser: str) -> None:
+        """Close the selected browser only after explicit confirmation in the UI."""
+        if os.name != "nt":
+            return
+        process_name = "msedge.exe" if browser == "edge" else "chrome.exe"
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            subprocess.run(
+                ["taskkill", "/IM", process_name, "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                creationflags=creation_flags,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise DouyinAuthError(
+                f"Không thể đóng {process_name}: {exc}",
+                code="close_failed",
+            ) from exc
 
     @staticmethod
     def open_login(browser: str) -> None:
@@ -180,6 +224,6 @@ class DouyinAuthManager:
         executable = next((path for path in candidates if path.is_file()), None)
         executable = executable or (Path(found) if (found := shutil.which(command_name)) else None)
         if executable:
-            subprocess.Popen([str(executable), url])
+            subprocess.Popen([str(executable), "--disable-background-mode", url])
         else:
             webbrowser.open(url)

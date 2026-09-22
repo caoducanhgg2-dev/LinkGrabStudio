@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.4
+
+- Sửa lỗi Chrome/Edge vẫn chạy nền và khóa cơ sở dữ liệu cookies.
+- Khi phát hiện khóa, app hỏi xác nhận trước khi đóng đúng trình duyệt đã chọn.
+- Sau khi đóng trình duyệt, app tự thử lấy đăng nhập Douyin lại, không cần mở Task Manager.
+- Thêm mã lỗi riêng cho khóa trình duyệt, lỗi DPAPI, cookies hết hạn và chưa đăng nhập.
+- Giữ nguyên cookies cũ nếu lần làm mới thất bại; tiếp tục giữ lịch sử và chống trùng.
+
 ## 1.3.3
 
 - Thêm đăng nhập Douyin ngay trong trang Cài đặt bằng phiên Chrome hoặc Edge.
