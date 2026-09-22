@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.5
+
+- Thiết kế lại khu vực link nguồn trong danh sách xem trước để không còn bị cắt khó đọc.
+- Bảng hiển thị URL rút gọn; di chuột lên link để xem URL đầy đủ.
+- Thêm thanh link nguồn đầy đủ theo video đang chọn, hỗ trợ chọn và sao chép trực tiếp.
+- Thêm nút Sao chép, Mở link và thao tác nhấp đúp vào cột Link nguồn.
+- Tiếp tục giữ nguyên lịch sử tải, cài đặt, chống trùng, backup và rollback của updater.
+
 ## 1.3.4
 
 - Sửa lỗi Chrome/Edge vẫn chạy nền và khóa cơ sở dữ liệu cookies.

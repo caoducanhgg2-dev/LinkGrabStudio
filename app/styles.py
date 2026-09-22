@@ -53,6 +53,16 @@ QFrame#card, QGroupBox {
     border: 1px solid #2f3042;
     border-radius: 12px;
 }
+QFrame#linkBar {
+    background: #171825;
+    border: 1px solid #34354a;
+    border-radius: 9px;
+}
+QFrame#linkBar QLineEdit {
+    color: #cbb9ff;
+    background: #11121d;
+    border-color: #464763;
+}
 QGroupBox {
     margin-top: 12px;
     padding: 14px 10px 10px 10px;

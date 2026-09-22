@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -301,10 +301,11 @@ class DownloadPage(QWidget):
 
         self.preview_table = QTableWidget(0, 9)
         self.preview_table.setHorizontalHeaderLabels(
-            ["Chọn", "Nền tảng", "Tiêu đề", "Kênh", "Lượt xem", "Ngày đăng", "Thời lượng", "Link", "Trạng thái"]
+            ["Chọn", "Nền tảng", "Tiêu đề", "Kênh", "Lượt xem", "Ngày đăng", "Thời lượng", "Link nguồn", "Trạng thái"]
         )
         self.preview_table.setAlternatingRowColors(True)
         self.preview_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.preview_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.preview_table.verticalHeader().setVisible(False)
         header = self.preview_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -313,8 +314,35 @@ class DownloadPage(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         for column in (4, 5, 6, 8):
             header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(7, QHeaderView.Stretch)
+        header.setSectionResizeMode(7, QHeaderView.Interactive)
+        header.resizeSection(7, 230)
+        self.preview_table.currentCellChanged.connect(self._preview_row_changed)
+        self.preview_table.cellDoubleClicked.connect(self._preview_cell_double_clicked)
         root.addWidget(self.preview_table, 1)
+
+        link_bar = QFrame()
+        link_bar.setObjectName("linkBar")
+        link_layout = QHBoxLayout(link_bar)
+        link_layout.setContentsMargins(12, 8, 12, 8)
+        link_layout.setSpacing(8)
+        link_label = QLabel("Link nguồn đang chọn")
+        link_label.setObjectName("muted")
+        link_layout.addWidget(link_label)
+        self.preview_link = QLineEdit()
+        self.preview_link.setReadOnly(True)
+        self.preview_link.setPlaceholderText("Chọn một video để xem link đầy đủ")
+        self.preview_link.setClearButtonEnabled(False)
+        link_layout.addWidget(self.preview_link, 1)
+        self.copy_link_button = QPushButton("⧉  Sao chép")
+        self.copy_link_button.setToolTip("Sao chép link nguồn đầy đủ")
+        self.copy_link_button.clicked.connect(self._copy_preview_link)
+        self.open_link_button = QPushButton("↗  Mở link")
+        self.open_link_button.setToolTip("Mở link nguồn trong trình duyệt")
+        self.open_link_button.clicked.connect(self._open_preview_link)
+        for button in (self.copy_link_button, self.open_link_button):
+            button.setEnabled(False)
+            link_layout.addWidget(button)
+        root.addWidget(link_bar)
 
         self.log_box = QPlainTextEdit()
         self.log_box.setReadOnly(True)
@@ -376,6 +404,9 @@ class DownloadPage(QWidget):
         self._logged_translations.clear()
         self.preview_table.setRowCount(0)
         self.preview_count.setText("0 video")
+        self.preview_link.clear()
+        self.copy_link_button.setEnabled(False)
+        self.open_link_button.setEnabled(False)
 
     def add_preview_video(self, video: VideoInfo, duplicate: dict[str, str] | None = None) -> None:
         original_query = str(video.raw.get("search_query_original") or "")
@@ -416,18 +447,71 @@ class DownloadPage(QWidget):
             views,
             upload_date or "—",
             format_duration(video.duration),
-            source_url,
+            self._short_source_url(source_url),
             status,
         ]
         for column, value in enumerate(values, 1):
-            self.preview_table.setItem(row, column, QTableWidgetItem(value))
+            item = QTableWidgetItem(value)
+            if column == 7:
+                item.setData(Qt.UserRole, source_url)
+                item.setToolTip(source_url)
+                item.setForeground(QColor("#a98bff"))
+            self.preview_table.setItem(row, column, item)
         self.videos.append(video)
+        if row == 0:
+            self.preview_table.setCurrentCell(0, 2)
         duplicate_count = sum(
             1 for index in range(self.preview_table.rowCount())
             if self.preview_table.item(index, 0).checkState() == Qt.Unchecked
         )
         suffix = f" • {duplicate_count} trùng" if duplicate_count else ""
         self.preview_count.setText(f"{len(self.videos)} video{suffix}")
+
+    @staticmethod
+    def _short_source_url(url: str, max_length: int = 54) -> str:
+        display = url.strip()
+        for prefix in ("https://www.", "http://www.", "https://", "http://"):
+            if display.startswith(prefix):
+                display = display[len(prefix):]
+                break
+        if len(display) <= max_length:
+            return display
+        return f"{display[:max_length - 1]}…"
+
+    def _source_url_for_row(self, row: int) -> str:
+        if row < 0 or row >= len(self.videos):
+            return ""
+        item = self.preview_table.item(row, 7)
+        if item:
+            return str(item.data(Qt.UserRole) or "")
+        video = self.videos[row]
+        return video.webpage_url or video.url
+
+    def _preview_row_changed(self, current_row: int, _current_column: int, _previous_row: int, _previous_column: int) -> None:
+        source_url = self._source_url_for_row(current_row)
+        self.preview_link.setText(source_url)
+        self.preview_link.setToolTip(source_url)
+        self.preview_link.setCursorPosition(0)
+        self.copy_link_button.setEnabled(bool(source_url))
+        self.open_link_button.setEnabled(bool(source_url))
+
+    def _copy_preview_link(self) -> None:
+        source_url = self.preview_link.text().strip()
+        if not source_url:
+            return
+        QApplication.clipboard().setText(source_url)
+        self.append_log("Đã sao chép link nguồn vào clipboard.")
+
+    def _open_preview_link(self) -> None:
+        source_url = self.preview_link.text().strip()
+        if source_url:
+            QDesktopServices.openUrl(QUrl(source_url))
+
+    def _preview_cell_double_clicked(self, row: int, column: int) -> None:
+        if column != 7:
+            return
+        self.preview_table.setCurrentCell(row, column)
+        self._open_preview_link()
 
     def add_preview_error(self, url: str, error: str) -> None:
         self._preview_errors.append(error)

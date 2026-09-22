@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 APP_NAME = "LinkGrab Studio"
-APP_VERSION = "1.3.4"
+APP_VERSION = "1.3.5"
 APP_DIR_NAME = "LinkGrabStudio"
 
 
