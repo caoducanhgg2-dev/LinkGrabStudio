@@ -45,7 +45,12 @@ QPushButton#platform {
 QPushButton#platform:checked { background: #211b3f; border: 2px solid #8b5cff; }
 QPushButton#mode {
     border-radius: 8px;
-    padding: 8px 18px;
+    padding: 6px 14px;
+    text-align: center;
+}
+QPushButton#compact {
+    padding: 6px 11px;
+    border-radius: 7px;
     text-align: center;
 }
 QFrame#card, QGroupBox {

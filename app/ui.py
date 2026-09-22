@@ -66,12 +66,13 @@ class DownloadPage(QWidget):
         self._preview_errors: list[str] = []
         self._logged_translations: set[tuple[str, str]] = set()
         self._auto_queue_after_preview = False
+        self._controls_collapsed = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 18, 22, 18)
-        root.setSpacing(14)
+        root.setSpacing(10)
 
         title_row = QHBoxLayout()
         title = QLabel("Tải video ngay")
@@ -86,6 +87,11 @@ class DownloadPage(QWidget):
         self.engine_badge.setObjectName("countBadge")
         title_row.addWidget(self.engine_badge)
         root.addLayout(title_row)
+
+        self.source_controls = QWidget()
+        source_layout = QVBoxLayout(self.source_controls)
+        source_layout.setContentsMargins(0, 0, 0, 0)
+        source_layout.setSpacing(8)
 
         platform_row = QHBoxLayout()
         platform_row.addWidget(QLabel("Chọn nền tảng"))
@@ -106,21 +112,22 @@ class DownloadPage(QWidget):
         more.setEnabled(False)
         platform_row.addWidget(more)
         platform_row.addStretch()
-        root.addLayout(platform_row)
+        source_layout.addLayout(platform_row)
 
         body = QHBoxLayout()
         body.setSpacing(14)
         form_card = QFrame()
         form_card.setObjectName("card")
         form = QVBoxLayout(form_card)
-        form.setContentsMargins(16, 16, 16, 16)
+        form.setContentsMargins(12, 10, 12, 10)
+        form.setSpacing(6)
 
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("Chế độ"))
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
-        self.keyword_mode = QPushButton("🔍 Theo từ khóa • MỚI")
-        self.link_mode = QPushButton("🔗 Theo link")
+        self.keyword_mode = QPushButton("🔍 Từ khóa")
+        self.link_mode = QPushButton("🔗 Link")
         self.playlist_mode = QPushButton("▤ Playlist/Bộ")
         for button in (self.keyword_mode, self.link_mode, self.playlist_mode):
             button.setObjectName("mode")
@@ -128,7 +135,7 @@ class DownloadPage(QWidget):
             self.mode_group.addButton(button)
             mode_row.addWidget(button)
         self.link_mode.setChecked(True)
-        self.channel_mode = QPushButton("👤 Theo kênh • MỚI")
+        self.channel_mode = QPushButton("👤 Kênh")
         self.channel_mode.setObjectName("mode")
         self.channel_mode.setCheckable(True)
         self.mode_group.addButton(self.channel_mode)
@@ -136,10 +143,7 @@ class DownloadPage(QWidget):
         mode_row.addStretch()
         form.addLayout(mode_row)
 
-        channel_hint = QLabel(
-            "MỚI 1.3: Tìm video YouTube/Douyin theo từ khóa, tự dịch sang tiếng Trung; "
-            "video trùng có thể bỏ qua hoặc tải lại."
-        )
+        channel_hint = QLabel("Từ khóa: YouTube/Douyin • dịch tiếng Trung • tự nhận diện video trùng")
         channel_hint.setObjectName("countBadge")
         channel_hint.setWordWrap(True)
         form.addWidget(channel_hint)
@@ -157,7 +161,8 @@ class DownloadPage(QWidget):
             "https://www.youtube.com/watch?v=...\n"
             "https://www.tiktok.com/@user/video/..."
         )
-        self.url_input.setMinimumHeight(105)
+        self.url_input.setMinimumHeight(62)
+        self.url_input.setMaximumHeight(76)
         self.url_input.textChanged.connect(self._update_link_summary)
         form.addWidget(self.url_input)
         self.link_summary = QLabel("Chưa có link")
@@ -193,7 +198,7 @@ class DownloadPage(QWidget):
             "Video đã tải sẽ được bỏ chọn và hiển thị ngày tải cùng link nguồn."
         )
         self.channel_duplicate_note.setObjectName("muted")
-        channel_grid.addWidget(self.channel_duplicate_note, 2, 0, 1, 3)
+        self.channel_filters.setToolTip(self.channel_duplicate_note.text())
         self.channel_filters.setVisible(False)
         form.addWidget(self.channel_filters)
 
@@ -233,7 +238,7 @@ class DownloadPage(QWidget):
             "YouTube/Douyin sẽ tìm rộng hơn số lượng yêu cầu, sau đó app lọc và xếp hạng kết quả tốt nhất."
         )
         search_note.setObjectName("muted")
-        search_grid.addWidget(search_note, 2, 0, 1, 3)
+        self.search_filters.setToolTip(search_note.text())
         self.search_filters.setVisible(False)
         form.addWidget(self.search_filters)
 
@@ -289,7 +294,8 @@ class DownloadPage(QWidget):
             action_layout.addWidget(button)
         action_layout.addStretch()
         body.addWidget(actions)
-        root.addLayout(body)
+        source_layout.addLayout(body)
+        root.addWidget(self.source_controls)
 
         preview_header = QHBoxLayout()
         preview_header.addWidget(QLabel("Danh sách video"))
@@ -297,6 +303,14 @@ class DownloadPage(QWidget):
         self.preview_count.setObjectName("countBadge")
         preview_header.addWidget(self.preview_count)
         preview_header.addStretch()
+        self.compact_queue_button = QPushButton("▤  Thêm đã chọn")
+        self.compact_queue_button.setObjectName("compact")
+        self.compact_queue_button.clicked.connect(self._queue_selected)
+        preview_header.addWidget(self.compact_queue_button)
+        self.toggle_controls_button = QPushButton("▴  Thu gọn bộ chọn")
+        self.toggle_controls_button.setObjectName("compact")
+        self.toggle_controls_button.clicked.connect(self._toggle_source_controls)
+        preview_header.addWidget(self.toggle_controls_button)
         root.addLayout(preview_header)
 
         self.preview_table = QTableWidget(0, 9)
@@ -346,7 +360,7 @@ class DownloadPage(QWidget):
 
         self.log_box = QPlainTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMaximumHeight(115)
+        self.log_box.setMaximumHeight(80)
         self.log_box.setPlaceholderText("Nhật ký hoạt động sẽ hiển thị ở đây…")
         root.addWidget(self.log_box)
 
@@ -524,6 +538,8 @@ class DownloadPage(QWidget):
     def preview_finished(self) -> None:
         self.set_busy(False)
         self.append_log(f"Đã đọc xong {len(self.videos)} video.")
+        if self.videos:
+            self._set_source_controls_collapsed(True)
         if not self.videos and self._preview_errors:
             QMessageBox.warning(
                 self,
@@ -534,6 +550,16 @@ class DownloadPage(QWidget):
             self._auto_queue_after_preview = False
             if self.videos:
                 self._queue_selected()
+
+    def _toggle_source_controls(self) -> None:
+        self._set_source_controls_collapsed(not self._controls_collapsed)
+
+    def _set_source_controls_collapsed(self, collapsed: bool) -> None:
+        self._controls_collapsed = collapsed
+        self.source_controls.setVisible(not collapsed)
+        self.toggle_controls_button.setText(
+            "▾  Hiện bộ chọn" if collapsed else "▴  Thu gọn bộ chọn"
+        )
 
     def set_busy(self, busy: bool) -> None:
         self.preview_button.setEnabled(not busy)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.6
+
+- Thu gọn thanh chọn chế độ và rút ngắn chiều cao ô nhập từ khóa/link.
+- Tự ẩn toàn bộ bộ chọn sau khi đọc xong video để bảng hiển thị nhiều dòng hơn.
+- Thêm nút Hiện bộ chọn/Thu gọn bộ chọn ngay trên danh sách video.
+- Thêm nút Thêm đã chọn cạnh bảng để vẫn thao tác được khi bộ chọn đang ẩn.
+- Giảm chiều cao nhật ký hoạt động, ưu tiên không gian cho danh sách video.
+- Giữ nguyên lịch sử, cookies, cài đặt, chống trùng, backup và rollback.
+
 ## 1.3.5
 
 - Thiết kế lại khu vực link nguồn trong danh sách xem trước để không còn bị cắt khó đọc.
