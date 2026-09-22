@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 APP_NAME = "LinkGrab Studio"
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 APP_DIR_NAME = "LinkGrabStudio"
 
 
@@ -31,6 +31,7 @@ class AppSettings:
     quality: str = "1080p"
     media_format: str = "MP4"
     cookies_file: str = ""
+    douyin_browser: str = "chrome"
     auto_clipboard: bool = True
     skip_duplicates: bool = True
 

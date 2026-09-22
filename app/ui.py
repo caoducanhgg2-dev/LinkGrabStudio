@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .auth import DouyinAuthManager
 from .config import APP_NAME, APP_VERSION, AppSettings, app_data_dir
 from .database import HistoryDatabase
 from .downloader import DownloaderEngine
@@ -42,7 +43,7 @@ from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions
 from .styles import APP_STYLE
 from .updater import EngineUpdater
 from .utils import detect_platform, extract_urls, format_duration
-from .workers import EngineUpdateWorker, PreviewWorker, QueueController
+from .workers import DouyinAuthWorker, EngineUpdateWorker, PreviewWorker, QueueController
 
 
 def open_path(path: Path) -> None:
@@ -652,6 +653,9 @@ class HistoryPage(QWidget):
 class SettingsPage(QWidget):
     settings_saved = Signal()
     update_engine_requested = Signal()
+    douyin_open_requested = Signal(str)
+    douyin_check_requested = Signal()
+    douyin_refresh_requested = Signal(str)
 
     def __init__(self, settings: AppSettings) -> None:
         super().__init__()
@@ -671,7 +675,7 @@ class SettingsPage(QWidget):
         self.skip_duplicates = QCheckBox("Tự động bỏ qua video đã tải")
         self.skip_duplicates.setChecked(settings.skip_duplicates)
         grid.addWidget(self.skip_duplicates, 1, 0, 1, 2)
-        grid.addWidget(QLabel("Cookies.txt (không bắt buộc)"), 2, 0)
+        grid.addWidget(QLabel("Cookies.txt thủ công (dự phòng)"), 2, 0)
         cookie_row = QHBoxLayout()
         self.cookies = QLineEdit(settings.cookies_file)
         choose = QPushButton("Chọn file")
@@ -680,6 +684,40 @@ class SettingsPage(QWidget):
         cookie_row.addWidget(choose)
         grid.addLayout(cookie_row, 2, 1)
         layout.addWidget(general)
+
+        douyin_group = QGroupBox("Đăng nhập Douyin bằng trình duyệt")
+        douyin_layout = QGridLayout(douyin_group)
+        douyin_layout.addWidget(QLabel("Lấy đăng nhập từ"), 0, 0)
+        self.douyin_browser = QComboBox()
+        self.douyin_browser.addItem("Google Chrome", "chrome")
+        self.douyin_browser.addItem("Microsoft Edge", "edge")
+        browser_index = self.douyin_browser.findData(settings.douyin_browser)
+        self.douyin_browser.setCurrentIndex(max(0, browser_index))
+        douyin_layout.addWidget(self.douyin_browser, 0, 1)
+        self.douyin_status = QLabel("Chưa kiểm tra đăng nhập Douyin.")
+        self.douyin_status.setObjectName("muted")
+        douyin_layout.addWidget(self.douyin_status, 1, 0, 1, 2)
+        douyin_buttons = QHBoxLayout()
+        self.open_douyin_button = QPushButton("Mở Douyin để đăng nhập")
+        self.check_douyin_button = QPushButton("Kiểm tra đăng nhập")
+        self.refresh_douyin_button = QPushButton("Làm mới cookies")
+        self.open_douyin_button.clicked.connect(
+            lambda: self.douyin_open_requested.emit(str(self.douyin_browser.currentData()))
+        )
+        self.check_douyin_button.clicked.connect(self.douyin_check_requested)
+        self.refresh_douyin_button.clicked.connect(
+            lambda: self.douyin_refresh_requested.emit(str(self.douyin_browser.currentData()))
+        )
+        douyin_buttons.addWidget(self.open_douyin_button)
+        douyin_buttons.addWidget(self.check_douyin_button)
+        douyin_buttons.addWidget(self.refresh_douyin_button)
+        douyin_layout.addLayout(douyin_buttons, 2, 0, 1, 2)
+        douyin_note = QLabel(
+            "App không lưu mật khẩu. Hãy đăng nhập trên Chrome/Edge, sau đó bấm Làm mới cookies."
+        )
+        douyin_note.setObjectName("muted")
+        douyin_layout.addWidget(douyin_note, 3, 0, 1, 2)
+        layout.addWidget(douyin_group)
         engine_group = QGroupBox("Engine tải video")
         engine_layout = QHBoxLayout(engine_group)
         self.engine_status = QLabel("Có thể cập nhật yt-dlp riêng mà không cài lại ứng dụng.")
@@ -703,10 +741,22 @@ class SettingsPage(QWidget):
     def save(self) -> None:
         self.settings.concurrency = self.concurrency.value()
         self.settings.cookies_file = self.cookies.text().strip()
+        self.settings.douyin_browser = str(self.douyin_browser.currentData())
         self.settings.skip_duplicates = self.skip_duplicates.isChecked()
         self.settings.save()
         self.settings_saved.emit()
         QMessageBox.information(self, APP_NAME, "Đã lưu cài đặt.")
+
+    def set_douyin_status(self, message: str) -> None:
+        self.douyin_status.setText(message)
+
+    def set_douyin_busy(self, busy: bool) -> None:
+        self.refresh_douyin_button.setEnabled(not busy)
+        self.check_douyin_button.setEnabled(not busy)
+        self.douyin_status.setText("Đang đọc phiên đăng nhập từ trình duyệt…" if busy else self.douyin_status.text())
+
+    def set_managed_cookie_file(self, path: Path) -> None:
+        self.cookies.setText(str(path))
 
 
 class MainWindow(QMainWindow):
@@ -715,16 +765,18 @@ class MainWindow(QMainWindow):
         self.settings = AppSettings.load()
         self.database = HistoryDatabase()
         self.engine = DownloaderEngine()
+        self.douyin_auth = DouyinAuthManager(self.engine)
         self.preview_pool = QThreadPool(self)
         self.preview_pool.setMaxThreadCount(1)
         self.queue = QueueController(self.engine, self.database, self.settings.concurrency)
-        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Douyin + Tải lại")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Đăng nhập Douyin")
         self.resize(1450, 890)
         self.setMinimumSize(1100, 700)
         self.setStyleSheet(APP_STYLE)
         self._setup_ui()
         self._connect_signals()
         QTimer.singleShot(100, self._check_engine)
+        QTimer.singleShot(150, self._check_douyin_auth)
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -758,7 +810,7 @@ class MainWindow(QMainWindow):
             if index == 0:
                 button.setChecked(True)
         side_layout.addStretch()
-        version = QLabel(f"Bản {APP_VERSION}\nDouyin + Tải lại\nWindows 10/11")
+        version = QLabel(f"Bản {APP_VERSION}\nĐăng nhập Douyin\nWindows 10/11")
         version.setObjectName("muted")
         side_layout.addWidget(version)
         root.addWidget(sidebar)
@@ -795,6 +847,9 @@ class MainWindow(QMainWindow):
         self.queue.queue_counts.connect(self.queue_page.set_counts)
         self.settings_page.settings_saved.connect(self._settings_saved)
         self.settings_page.update_engine_requested.connect(self._update_engine)
+        self.settings_page.douyin_open_requested.connect(self._open_douyin_login)
+        self.settings_page.douyin_check_requested.connect(self._check_douyin_auth)
+        self.settings_page.douyin_refresh_requested.connect(self._refresh_douyin_auth)
 
     @Slot(list, object, bool)
     def _start_preview(self, urls: list[str], preview_options: PreviewOptions, _auto_queue: bool) -> None:
@@ -890,6 +945,42 @@ class MainWindow(QMainWindow):
 
     def _settings_saved(self) -> None:
         self.queue.set_concurrency(self.settings.concurrency)
+
+    @Slot(str)
+    def _open_douyin_login(self, browser: str) -> None:
+        self.douyin_auth.open_login(browser)
+        self.settings_page.set_douyin_status(
+            "Hãy đăng nhập Douyin trong trình duyệt, rồi quay lại bấm Làm mới cookies."
+        )
+
+    def _check_douyin_auth(self) -> None:
+        configured = Path(self.settings.cookies_file) if self.settings.cookies_file else None
+        status = self.douyin_auth.status(configured)
+        self.settings_page.set_douyin_status(status.message)
+
+    @Slot(str)
+    def _refresh_douyin_auth(self, browser: str) -> None:
+        self.settings.douyin_browser = browser
+        self.settings_page.set_douyin_busy(True)
+        worker = DouyinAuthWorker(self.douyin_auth, browser)
+        worker.signals.finished.connect(self._douyin_auth_finished)
+        worker.signals.error.connect(self._douyin_auth_failed)
+        self.preview_pool.start(worker)
+
+    @Slot(object)
+    def _douyin_auth_finished(self, status) -> None:
+        self.settings_page.set_douyin_busy(False)
+        self.settings.cookies_file = str(status.cookie_file or self.douyin_auth.cookie_file)
+        self.settings.save()
+        self.settings_page.set_managed_cookie_file(Path(self.settings.cookies_file))
+        self.settings_page.set_douyin_status(status.message)
+        QMessageBox.information(self, "Đăng nhập Douyin", status.message)
+
+    @Slot(str)
+    def _douyin_auth_failed(self, error: str) -> None:
+        self.settings_page.set_douyin_busy(False)
+        self.settings_page.set_douyin_status("Chưa đăng nhập Douyin hoặc cookies không đọc được.")
+        QMessageBox.warning(self, "Đăng nhập Douyin", error)
 
     def _check_engine(self) -> None:
         if self.engine.is_ready:

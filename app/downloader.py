@@ -357,7 +357,8 @@ class DownloaderEngine:
             detail = errors[0] if errors else "Douyin không trả về metadata video."
             raise DownloaderError(
                 "Đã tìm thấy link Douyin nhưng không đọc được video. "
-                "Hãy thêm cookies.txt Douyin trong Cài đặt rồi thử lại. Chi tiết: " + detail
+                "Hãy vào Cài đặt, lấy đăng nhập từ Chrome/Edge rồi thử lại. Chi tiết: "
+                + detail
             )
         return videos
 

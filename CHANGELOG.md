@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.3
+
+- Thêm đăng nhập Douyin ngay trong trang Cài đặt bằng phiên Chrome hoặc Edge.
+- App tự lấy cookies từ hồ sơ trình duyệt gần nhất; không cần xuất cookies.txt thủ công.
+- Thêm trạng thái `Đã đăng nhập Douyin`, `Cookies hết hạn` và hướng dẫn đăng nhập lại.
+- Thêm nút Mở Douyin để đăng nhập, Kiểm tra đăng nhập và Làm mới cookies.
+- Không lưu mật khẩu Douyin; phiên được lưu cục bộ trong thư mục dữ liệu ứng dụng.
+- Giữ nguyên lịch sử tải, cài đặt, chống trùng, backup và rollback của updater.
+
 ## 1.3.2
 
 - Sửa lỗi bản Windows báo `No module named expat; use SimpleXMLTreeBuilder instead` khi tìm video Douyin.
