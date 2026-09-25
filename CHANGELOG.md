@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.3
+
+- Sửa bước đọc metadata Douyin vẫn báo cần đăng nhập sau khi tìm thấy link.
+- Dùng trực tiếp tiêu đề, tác giả, lượt xem, ngày đăng, thời lượng và địa chỉ phát từ kết quả tìm kiếm Douyin.
+- Tải video Douyin từ địa chỉ phát đã xác thực, không gọi lại API chi tiết đang yêu cầu chữ ký xác minh.
+- Giữ link trang Douyin làm link nguồn trong lịch sử và chống trùng theo ID video.
+- Giữ nguyên đăng nhập, lịch sử, cài đặt, checksum, backup và rollback.
+
 ## 1.5.2
 
 - Sửa tìm kiếm từ khóa Douyin sau khi app đã nhận đăng nhập thành công.

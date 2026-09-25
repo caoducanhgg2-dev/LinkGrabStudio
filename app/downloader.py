@@ -191,11 +191,17 @@ class DownloaderEngine:
                 continue
             translated_query = self.translate_keyword(clean_query, options.search_language)
             if options.search_platform == "Douyin":
-                urls = self._search_douyin_urls_authenticated(
+                direct_videos, urls = self._search_douyin_authenticated(
                     translated_query,
                     scan_limit,
                     cookies_file=cookies_file,
                 )
+                if direct_videos:
+                    for video in direct_videos:
+                        video.raw["search_query_original"] = clean_query
+                        video.raw["search_query_translated"] = translated_query
+                    candidates.extend(direct_videos)
+                    continue
                 if not urls:
                     # Public search engines are only a last resort. Their Douyin
                     # indexes are incomplete and can be empty even when the user
@@ -273,6 +279,33 @@ class DownloaderEngine:
             )
         return filtered[: max(1, options.search_limit)]
 
+    def _search_douyin_authenticated(
+        self,
+        query: str,
+        limit: int,
+        *,
+        cookies_file: Path | None = None,
+    ) -> tuple[list[VideoInfo], list[str]]:
+        """Return rich search items and direct Douyin page URLs from one request."""
+        bodies = self._fetch_douyin_search_bodies(query, limit, cookies_file=cookies_file)
+        videos: list[VideoInfo] = []
+        urls: list[str] = []
+        seen_videos: set[str] = set()
+        seen_urls: set[str] = set()
+        for body in bodies:
+            for video in self._extract_douyin_search_videos(body):
+                if video.unique_key in seen_videos:
+                    continue
+                seen_videos.add(video.unique_key)
+                videos.append(video)
+            for url in self._extract_douyin_video_urls(body):
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                urls.append(url)
+        wanted = max(1, min(300, limit))
+        return videos[:wanted], urls[:wanted]
+
     def _search_douyin_urls_authenticated(
         self,
         query: str,
@@ -286,6 +319,19 @@ class DownloaderEngine:
         deliberately tolerant: it accepts direct URLs and the stable numeric
         identifiers found in both page hydration data and JSON API responses.
         """
+        _, urls = self._search_douyin_authenticated(
+            query, limit, cookies_file=cookies_file
+        )
+        return urls
+
+    def _fetch_douyin_search_bodies(
+        self,
+        query: str,
+        limit: int,
+        *,
+        cookies_file: Path | None = None,
+    ) -> list[str]:
+        """Fetch the search HTML/API while keeping cookies out of logs."""
         wanted = max(1, min(300, limit))
         encoded_query = urllib.parse.quote(query, safe="")
         referer = f"https://www.douyin.com/search/{encoded_query}?type=video"
@@ -325,8 +371,7 @@ class DownloaderEngine:
             "https://www.douyin.com/aweme/v1/web/general/search/single/?" + api_params
         )
 
-        found: list[str] = []
-        seen: set[str] = set()
+        bodies: list[str] = []
         for source in sources:
             source_headers = dict(headers)
             source_headers["Referer"] = referer
@@ -338,14 +383,134 @@ class DownloaderEngine:
                     body = response.read().decode("utf-8", errors="replace")
             except (OSError, urllib.error.URLError):
                 continue
-            for candidate in self._extract_douyin_video_urls(body):
-                if candidate in seen:
+            bodies.append(body)
+        return bodies
+
+    @classmethod
+    def _extract_douyin_search_videos(cls, body: str) -> list[VideoInfo]:
+        """Build preview rows directly from Douyin search JSON/hydration data."""
+        decoded = html.unescape(urllib.parse.unquote(body))
+        decoded = decoded.replace("\\u002F", "/").replace("\\/", "/")
+        payloads: list[object] = []
+        candidates = [decoded]
+        candidates.extend(re.findall(r"<script[^>]*>(.*?)</script>", decoded, flags=re.I | re.S))
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            try:
+                payloads.append(json.loads(candidate))
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        videos: list[VideoInfo] = []
+        seen: set[str] = set()
+        for payload in payloads:
+            for item in cls._walk_douyin_dicts(payload):
+                video = cls._video_from_douyin_search_item(item)
+                if not video or video.unique_key in seen:
                     continue
-                seen.add(candidate)
-                found.append(candidate)
-                if len(found) >= wanted:
-                    return found
-        return found
+                seen.add(video.unique_key)
+                videos.append(video)
+        return videos
+
+    @staticmethod
+    def _walk_douyin_dicts(value) -> Iterable[dict]:
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from DownloaderEngine._walk_douyin_dicts(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from DownloaderEngine._walk_douyin_dicts(child)
+        elif isinstance(value, str) and value.lstrip().startswith(("{", "[")):
+            try:
+                nested = json.loads(value)
+            except json.JSONDecodeError:
+                return
+            yield from DownloaderEngine._walk_douyin_dicts(nested)
+
+    @classmethod
+    def _video_from_douyin_search_item(cls, item: dict) -> VideoInfo | None:
+        video_id = str(
+            item.get("aweme_id")
+            or item.get("awemeId")
+            or item.get("group_id")
+            or item.get("groupId")
+            or ""
+        )
+        if not re.fullmatch(r"\d{12,}", video_id):
+            return None
+        video_data = item.get("video")
+        if not isinstance(video_data, dict):
+            return None
+        direct_url = cls._douyin_media_url(video_data)
+        if not direct_url:
+            return None
+        author = item.get("author") if isinstance(item.get("author"), dict) else {}
+        statistics = item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
+        create_time = cls._optional_int(item.get("create_time") or item.get("createTime"))
+        duration_ms = cls._optional_int(video_data.get("duration") or item.get("duration"))
+        cover = video_data.get("cover") or video_data.get("origin_cover") or {}
+        thumbnail = cls._first_url(cover)
+        webpage_url = f"https://www.douyin.com/video/{video_id}"
+        raw = dict(item)
+        raw["direct_url"] = direct_url
+        if create_time:
+            raw["timestamp"] = create_time
+        return VideoInfo(
+            url=webpage_url,
+            video_id=video_id,
+            title=str(item.get("desc") or item.get("title") or f"Douyin {video_id}"),
+            platform="Douyin",
+            uploader=str(author.get("nickname") or author.get("unique_id") or ""),
+            duration=round(duration_ms / 1000) if duration_ms else None,
+            thumbnail=thumbnail,
+            webpage_url=webpage_url,
+            extractor="DouyinSearch",
+            view_count=cls._optional_int(
+                statistics.get("play_count") or statistics.get("playCount")
+            ),
+            upload_date=(
+                datetime.fromtimestamp(create_time, tz=timezone.utc).strftime("%Y%m%d")
+                if create_time
+                else ""
+            ),
+            raw=raw,
+        )
+
+    @classmethod
+    def _douyin_media_url(cls, video_data: dict) -> str:
+        sources = [
+            video_data.get("play_addr"),
+            video_data.get("playAddr"),
+            video_data.get("play_addr_h264"),
+            video_data.get("download_addr"),
+        ]
+        bit_rates = video_data.get("bit_rate") or video_data.get("bitRate") or []
+        if isinstance(bit_rates, list):
+            for rate in bit_rates:
+                if isinstance(rate, dict):
+                    sources.append(rate.get("play_addr") or rate.get("playAddr"))
+        for source in sources:
+            url = cls._first_url(source)
+            if url:
+                return url.replace("http://", "https://", 1)
+        return ""
+
+    @staticmethod
+    def _first_url(value) -> str:
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+        if not isinstance(value, dict):
+            return ""
+        urls = value.get("url_list") or value.get("urlList") or []
+        if isinstance(urls, list):
+            return next(
+                (str(url) for url in urls if str(url).startswith(("http://", "https://"))),
+                "",
+            )
+        return ""
 
     @classmethod
     def _extract_douyin_video_urls(cls, body: str) -> list[str]:
@@ -359,7 +524,8 @@ class DownloaderEngine:
         )
         identifiers.extend(
             re.findall(
-                r'["\'](?:aweme_id|group_id|item_id|video_id)["\']\s*:\s*["\'](\d{12,})["\']',
+                r'["\'](?:aweme_id|awemeId|group_id|groupId|item_id|itemId|video_id|videoId)'
+                r'["\']\s*:\s*["\']?(\d{12,})["\']?',
                 decoded,
             )
         )
@@ -548,7 +714,20 @@ class DownloaderEngine:
     ) -> DownloadJob:
         options = job.options
         options.output_dir.mkdir(parents=True, exist_ok=True)
-        command = self.build_download_command(job.video.webpage_url or job.video.url, options)
+        direct_url = str(job.video.raw.get("direct_url") or "")
+        source_url = direct_url or job.video.webpage_url or job.video.url
+        command = self.build_download_command(
+            source_url,
+            options,
+            filename_stem=(f"{job.video.title} [{job.video.video_id}]" if direct_url else None),
+        )
+        if direct_url:
+            command[-1:-1] = [
+                "--add-header",
+                "Referer:https://www.douyin.com/",
+                "--add-header",
+                "Origin:https://www.douyin.com",
+            ]
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         try:
             process = subprocess.Popen(
@@ -606,7 +785,17 @@ class DownloaderEngine:
             with self._lock:
                 self._processes.pop(job.job_id, None)
 
-    def build_download_command(self, url: str, options: DownloadOptions) -> list[str]:
+    def build_download_command(
+        self,
+        url: str,
+        options: DownloadOptions,
+        *,
+        filename_stem: str | None = None,
+    ) -> list[str]:
+        output_name = "%(title).180B [%(id)s].%(ext)s"
+        if filename_stem:
+            safe_stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename_stem).strip(" .")
+            output_name = f"{safe_stem[:180] or 'Douyin video'}.%(ext)s"
         command = [
             str(self.ytdlp),
             "--ignore-config",
@@ -626,7 +815,7 @@ class DownloaderEngine:
             "--print",
             "after_move:__LINKGRAB_FILE__%(filepath)s",
             "--output",
-            str(options.output_dir / "%(title).180B [%(id)s].%(ext)s"),
+            str(options.output_dir / output_name),
             "--yes-playlist" if options.playlist else "--no-playlist",
         ]
         if options.overwrite_existing:
@@ -772,7 +961,7 @@ class DownloaderEngine:
         if "private video" in lowered:
             return "Video riêng tư hoặc tài khoản chưa có quyền xem."
         if "sign in" in lowered or "cookies" in lowered:
-            return "Video cần đăng nhập. Hãy thêm cookies.txt trong Cài đặt."
+            return "Video cần đăng nhập. Hãy làm mới đăng nhập trình duyệt trong Cài đặt."
         if "unsupported url" in lowered:
             return "Link này chưa được hỗ trợ."
         if "video unavailable" in lowered:

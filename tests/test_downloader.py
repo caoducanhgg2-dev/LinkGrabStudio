@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.downloader import DownloaderEngine
-from app.models import DownloadOptions, PreviewOptions, VideoInfo
+from app.models import DownloadJob, DownloadOptions, PreviewOptions, VideoInfo
 
 
 def test_mp4_command_has_quality_and_safe_output(tmp_path: Path) -> None:
@@ -237,8 +237,8 @@ def test_douyin_keyword_search_uses_indexed_direct_video_urls(monkeypatch) -> No
     monkeypatch.setattr(engine, "translate_keyword", lambda query, language: "吃播")
     monkeypatch.setattr(
         engine,
-        "_search_douyin_urls_authenticated",
-        lambda query, limit, cookies_file=None: [],
+        "_search_douyin_authenticated",
+        lambda query, limit, cookies_file=None: ([], []),
     )
     monkeypatch.setattr(
         engine,
@@ -332,10 +332,21 @@ def test_douyin_keyword_search_prefers_authenticated_results(monkeypatch) -> Non
     monkeypatch.setattr(engine, "translate_keyword", lambda query, language: "吃播")
     monkeypatch.setattr(
         engine,
-        "_search_douyin_urls_authenticated",
-        lambda query, limit, cookies_file=None: [
-            "https://www.douyin.com/video/7390012345678901234"
-        ],
+        "_search_douyin_authenticated",
+        lambda query, limit, cookies_file=None: (
+            [
+                VideoInfo(
+                    url="https://www.douyin.com/video/7390012345678901234",
+                    video_id="7390012345678901234",
+                    title="吃播",
+                    platform="Douyin",
+                    webpage_url="https://www.douyin.com/video/7390012345678901234",
+                    extractor="DouyinSearch",
+                    raw={"direct_url": "https://video.example.test/play.mp4"},
+                )
+            ],
+            ["https://www.douyin.com/video/7390012345678901234"],
+        ),
     )
 
     def fail_public_index(query, limit):
@@ -369,6 +380,78 @@ def test_douyin_keyword_search_prefers_authenticated_results(monkeypatch) -> Non
         ),
     )
     assert [video.video_id for video in videos] == ["7390012345678901234"]
+
+
+def test_douyin_search_json_provides_metadata_and_direct_media() -> None:
+    engine = DownloaderEngine()
+    payload = {
+        "data": [
+            {
+                "aweme_info": {
+                    "aweme_id": "7390012345678901234",
+                    "desc": "Thử thách ăn ớt",
+                    "create_time": 1720000000,
+                    "author": {"nickname": "Food Creator"},
+                    "statistics": {"play_count": 987654},
+                    "video": {
+                        "duration": 61234,
+                        "play_addr": {
+                            "url_list": ["http://video.example.test/douyin-play"]
+                        },
+                        "cover": {
+                            "url_list": ["https://image.example.test/cover.jpeg"]
+                        },
+                    },
+                }
+            }
+        ]
+    }
+    videos = engine._extract_douyin_search_videos(json.dumps(payload))
+    assert len(videos) == 1
+    assert videos[0].title == "Thử thách ăn ớt"
+    assert videos[0].uploader == "Food Creator"
+    assert videos[0].duration == 61
+    assert videos[0].view_count == 987654
+    assert videos[0].webpage_url == "https://www.douyin.com/video/7390012345678901234"
+    assert videos[0].raw["direct_url"] == "https://video.example.test/douyin-play"
+
+
+def test_douyin_direct_media_download_keeps_title_and_source(monkeypatch, tmp_path: Path) -> None:
+    engine = DownloaderEngine()
+    video = VideoInfo(
+        url="https://www.douyin.com/video/7390012345678901234",
+        video_id="7390012345678901234",
+        title='Ăn ớt: thử thách? lớn*',
+        platform="Douyin",
+        webpage_url="https://www.douyin.com/video/7390012345678901234",
+        extractor="DouyinSearch",
+        raw={"direct_url": "https://video.example.test/douyin-play"},
+    )
+    job = DownloadJob(
+        job_id="douyin-direct",
+        video=video,
+        options=DownloadOptions(output_dir=tmp_path),
+    )
+    captured = {}
+
+    class FakeProcess:
+        stdout = iter(["__LINKGRAB_FILE__result.mp4\n"])
+
+        def wait(self):
+            return 0
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        return FakeProcess()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    result = engine.download(job)
+    command = captured["command"]
+    assert command[-1] == "https://video.example.test/douyin-play"
+    assert "Referer:https://www.douyin.com/" in command
+    output = command[command.index("--output") + 1]
+    assert "Ăn ớt_ thử thách_ lớn_ [7390012345678901234]" in output
+    assert result.output_path == "result.mp4"
 
 
 def test_douyin_discovery_reads_bing_rss_and_normalizes_urls(monkeypatch) -> None:
