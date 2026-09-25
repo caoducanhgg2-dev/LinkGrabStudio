@@ -376,7 +376,6 @@ class DownloadPage(QWidget):
         return [line.strip() for line in self.url_input.toPlainText().splitlines() if line.strip()]
 
     def current_options(self) -> DownloadOptions:
-        cookies = Path(self.settings.cookies_file) if self.settings.cookies_file else None
         return DownloadOptions(
             output_dir=Path(self.output_dir.text().strip()),
             quality=self.quality.currentText(),
@@ -385,7 +384,7 @@ class DownloadPage(QWidget):
             subtitles=self.subtitles.isChecked(),
             thumbnail=self.thumbnail.isChecked(),
             metadata=self.metadata.isChecked(),
-            cookies_file=cookies,
+            cookies_file=None,
         )
 
     def current_preview_options(self) -> PreviewOptions:
@@ -790,15 +789,31 @@ class SettingsPage(QWidget):
         self.skip_duplicates = QCheckBox("Tự động bỏ qua video đã tải")
         self.skip_duplicates.setChecked(settings.skip_duplicates)
         grid.addWidget(self.skip_duplicates, 1, 0, 1, 2)
-        grid.addWidget(QLabel("Cookies.txt (Douyin/Facebook/Instagram)"), 2, 0)
-        cookie_row = QHBoxLayout()
-        self.cookies = QLineEdit(settings.cookies_file)
-        choose = QPushButton("Chọn file")
-        choose.clicked.connect(self._choose_cookie)
-        cookie_row.addWidget(self.cookies)
-        cookie_row.addWidget(choose)
-        grid.addLayout(cookie_row, 2, 1)
         layout.addWidget(general)
+
+        cookie_group = QGroupBox("Cookies theo từng nền tảng")
+        cookie_grid = QGridLayout(cookie_group)
+        self.cookie_edits: dict[str, QLineEdit] = {}
+        cookie_fields = (
+            ("default", "File chung (dự phòng)", settings.cookies_file),
+            ("douyin", "Douyin", settings.douyin_cookies_file),
+            ("facebook", "Facebook", settings.facebook_cookies_file),
+            ("instagram", "Instagram", settings.instagram_cookies_file),
+        )
+        for row, (key, label, value) in enumerate(cookie_fields):
+            cookie_grid.addWidget(QLabel(label), row, 0)
+            edit = QLineEdit(value)
+            choose = QPushButton("Chọn file")
+            choose.clicked.connect(lambda _checked=False, name=key: self._choose_cookie(name))
+            self.cookie_edits[key] = edit
+            cookie_grid.addWidget(edit, row, 1)
+            cookie_grid.addWidget(choose, row, 2)
+        cookie_note = QLabel(
+            "App tự chọn đúng cookies theo link. Nội dung công khai thường không cần cookies."
+        )
+        cookie_note.setObjectName("muted")
+        cookie_grid.addWidget(cookie_note, len(cookie_fields), 0, 1, 3)
+        layout.addWidget(cookie_group)
 
         douyin_group = QGroupBox("Đăng nhập Douyin bằng trình duyệt")
         douyin_layout = QGridLayout(douyin_group)
@@ -848,14 +863,17 @@ class SettingsPage(QWidget):
         layout.addWidget(save)
         layout.addStretch()
 
-    def _choose_cookie(self) -> None:
+    def _choose_cookie(self, platform: str) -> None:
         filename, _ = QFileDialog.getOpenFileName(self, "Chọn cookies.txt", "", "Text files (*.txt);;All files (*.*)")
         if filename:
-            self.cookies.setText(filename)
+            self.cookie_edits[platform].setText(filename)
 
     def save(self) -> None:
         self.settings.concurrency = self.concurrency.value()
-        self.settings.cookies_file = self.cookies.text().strip()
+        self.settings.cookies_file = self.cookie_edits["default"].text().strip()
+        self.settings.douyin_cookies_file = self.cookie_edits["douyin"].text().strip()
+        self.settings.facebook_cookies_file = self.cookie_edits["facebook"].text().strip()
+        self.settings.instagram_cookies_file = self.cookie_edits["instagram"].text().strip()
         self.settings.douyin_browser = str(self.douyin_browser.currentData())
         self.settings.skip_duplicates = self.skip_duplicates.isChecked()
         self.settings.save()
@@ -871,7 +889,7 @@ class SettingsPage(QWidget):
         self.douyin_status.setText("Đang đọc phiên đăng nhập từ trình duyệt…" if busy else self.douyin_status.text())
 
     def set_managed_cookie_file(self, path: Path) -> None:
-        self.cookies.setText(str(path))
+        self.cookie_edits["douyin"].setText(str(path))
 
 
 class MainWindow(QMainWindow):
@@ -968,8 +986,15 @@ class MainWindow(QMainWindow):
 
     @Slot(list, object, bool)
     def _start_preview(self, urls: list[str], preview_options: PreviewOptions, _auto_queue: bool) -> None:
-        cookies = Path(self.settings.cookies_file) if self.settings.cookies_file else None
-        worker = PreviewWorker(self.engine, urls, preview_options, cookies)
+        cookie_files = {
+            "default": self.settings.cookies_for_platform(""),
+            "YouTube": self.settings.cookies_for_platform("YouTube"),
+            "TikTok": self.settings.cookies_for_platform("TikTok"),
+            "Douyin": self.settings.cookies_for_platform("Douyin"),
+            "Facebook": self.settings.cookies_for_platform("Facebook"),
+            "Instagram": self.settings.cookies_for_platform("Instagram"),
+        }
+        worker = PreviewWorker(self.engine, urls, preview_options, cookie_files)
         worker.signals.item.connect(self._add_preview_video)
         worker.signals.error.connect(self.download_page.add_preview_error)
         worker.signals.finished.connect(self.download_page.preview_finished)
@@ -1011,14 +1036,32 @@ class MainWindow(QMainWindow):
                 return
             reload_duplicates = clicked is reload_button
 
-        added, duplicates = self.queue.add_videos(
-            fresh, options, skip_duplicates=self.settings.skip_duplicates
-        )
-        if reload_duplicates:
-            reload_options = replace(options, overwrite_existing=True)
-            reloaded, active_duplicates = self.queue.add_videos(
-                completed, reload_options, skip_duplicates=False
+        added = 0
+        duplicates: list[VideoInfo] = []
+        for video in fresh:
+            video_options = replace(
+                options,
+                cookies_file=self.settings.cookies_for_platform(video.platform),
             )
+            video_added, video_duplicates = self.queue.add_videos(
+                [video], video_options, skip_duplicates=self.settings.skip_duplicates
+            )
+            added += video_added
+            duplicates.extend(video_duplicates)
+        if reload_duplicates:
+            reloaded = 0
+            active_duplicates: list[VideoInfo] = []
+            for video in completed:
+                reload_options = replace(
+                    options,
+                    overwrite_existing=True,
+                    cookies_file=self.settings.cookies_for_platform(video.platform),
+                )
+                video_added, video_duplicates = self.queue.add_videos(
+                    [video], reload_options, skip_duplicates=False
+                )
+                reloaded += video_added
+                active_duplicates.extend(video_duplicates)
             added += reloaded
             duplicates.extend(active_duplicates)
             self.download_page.append_log(
@@ -1069,7 +1112,7 @@ class MainWindow(QMainWindow):
         )
 
     def _check_douyin_auth(self) -> None:
-        configured = Path(self.settings.cookies_file) if self.settings.cookies_file else None
+        configured = self.settings.cookies_for_platform("Douyin")
         status = self.douyin_auth.status(configured)
         self.settings_page.set_douyin_status(status.message)
 
@@ -1086,9 +1129,9 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _douyin_auth_finished(self, status) -> None:
         self.settings_page.set_douyin_busy(False)
-        self.settings.cookies_file = str(status.cookie_file or self.douyin_auth.cookie_file)
+        self.settings.douyin_cookies_file = str(status.cookie_file or self.douyin_auth.cookie_file)
         self.settings.save()
-        self.settings_page.set_managed_cookie_file(Path(self.settings.cookies_file))
+        self.settings_page.set_managed_cookie_file(Path(self.settings.douyin_cookies_file))
         self.settings_page.set_douyin_status(status.message)
         QMessageBox.information(self, "Đăng nhập Douyin", status.message)
 

@@ -8,6 +8,8 @@
 - Chuẩn hóa link chia sẻ và bỏ tham số theo dõi nhưng vẫn giữ ID video cần thiết.
 - Mở rộng chống trùng riêng cho Facebook và Instagram.
 - Hỗ trợ cookies.txt cho bài đăng mà tài khoản người dùng được phép xem.
+- Thêm cookies riêng cho Douyin, Facebook và Instagram; app tự chọn theo từng link.
+- Giữ file cookies chung làm phương án dự phòng và tương thích cài đặt phiên bản cũ.
 - Giữ nguyên YouTube, TikTok, Douyin, lịch sử, cài đặt, backup và rollback.
 
 ## 1.3.6

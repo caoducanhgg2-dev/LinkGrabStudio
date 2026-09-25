@@ -22,6 +22,7 @@ TikTok, Douyin, Facebook và Instagram bằng cách dán một hoặc nhiều đ
 - Chống tải trùng bằng SQLite; video trùng được bỏ chọn, nhưng có thể chọn “Tải lại” để ghi lại file khi cần.
 - Lịch sử tải lưu link nguồn và mở nhanh thư mục kết quả.
 - Hỗ trợ cookies.txt cho nội dung Douyin/Facebook/Instagram mà tài khoản được phép xem.
+- Lưu cookies riêng theo nền tảng và tự chọn đúng file khi xử lý danh sách link hỗn hợp.
 - Dừng an toàn, thử tiếp tục file dở bằng khả năng resume của yt-dlp.
 
 ## Chạy mã nguồn để phát triển

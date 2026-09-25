@@ -31,6 +31,9 @@ class AppSettings:
     quality: str = "1080p"
     media_format: str = "MP4"
     cookies_file: str = ""
+    douyin_cookies_file: str = ""
+    facebook_cookies_file: str = ""
+    instagram_cookies_file: str = ""
     douyin_browser: str = "chrome"
     auto_clipboard: bool = True
     skip_duplicates: bool = True
@@ -56,3 +59,12 @@ class AppSettings:
         temp = path.with_suffix(".tmp")
         temp.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(path)
+
+    def cookies_for_platform(self, platform: str) -> Path | None:
+        specific = {
+            "douyin": self.douyin_cookies_file,
+            "facebook": self.facebook_cookies_file,
+            "instagram": self.instagram_cookies_file,
+        }.get(platform.strip().lower(), "")
+        selected = specific or self.cookies_file
+        return Path(selected) if selected else None

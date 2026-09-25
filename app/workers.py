@@ -10,6 +10,7 @@ from .auth import DouyinAuthError
 from .downloader import DownloaderEngine, DownloaderError
 from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions, VideoInfo
 from .updater import EngineUpdater
+from .utils import detect_platform
 
 
 class DouyinAuthSignals(QObject):
@@ -46,27 +47,32 @@ class PreviewSignals(QObject):
 
 
 class PreviewWorker(QRunnable):
-    def __init__(self, engine: DownloaderEngine, urls: list[str], options: PreviewOptions, cookies_file) -> None:
+    def __init__(self, engine: DownloaderEngine, urls: list[str], options: PreviewOptions, cookie_files) -> None:
         super().__init__()
         self.engine = engine
         self.urls = urls
         self.options = options
-        self.cookies_file = cookies_file
+        self.cookie_files = cookie_files
         self.signals = PreviewSignals()
+
+    def _cookies_for(self, url: str):
+        platform = self.options.search_platform if self.options.keyword_search else detect_platform(url)
+        return self.cookie_files.get(platform) or self.cookie_files.get("default")
 
     @Slot()
     def run(self) -> None:
         for url in self.urls:
             try:
+                cookies_file = self._cookies_for(url)
                 if self.options.keyword_search:
                     videos = self.engine.preview_search(
-                        [url], self.options, cookies_file=self.cookies_file
+                        [url], self.options, cookies_file=cookies_file
                     )
                 elif self.options.channel:
-                    videos = self.engine.preview_channel([url], self.options, cookies_file=self.cookies_file)
+                    videos = self.engine.preview_channel([url], self.options, cookies_file=cookies_file)
                 else:
                     videos = self.engine.preview(
-                        [url], playlist=self.options.playlist, cookies_file=self.cookies_file
+                        [url], playlist=self.options.playlist, cookies_file=cookies_file
                     )
                 for video in videos:
                     self.signals.item.emit(video)
