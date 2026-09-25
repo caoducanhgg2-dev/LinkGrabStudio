@@ -16,6 +16,16 @@ SUPPORTED_HOSTS = {
     "douyin.com": "Douyin",
     "www.douyin.com": "Douyin",
     "v.douyin.com": "Douyin",
+    "facebook.com": "Facebook",
+    "www.facebook.com": "Facebook",
+    "m.facebook.com": "Facebook",
+    "mbasic.facebook.com": "Facebook",
+    "web.facebook.com": "Facebook",
+    "fb.watch": "Facebook",
+    "instagram.com": "Instagram",
+    "www.instagram.com": "Instagram",
+    "m.instagram.com": "Instagram",
+    "instagr.am": "Instagram",
 }
 
 
@@ -44,7 +54,15 @@ def normalize_url(url: str) -> str:
     if "youtube.com" in host or host == "youtu.be":
         keep = {"v", "list", "index", "t"}
         query = [(k, v) for k, v in query if k in keep]
-    elif "tiktok.com" in host or "douyin.com" in host:
+    elif "facebook.com" in host:
+        keep = {"v", "story_fbid", "id"}
+        query = [(k, v) for k, v in query if k in keep]
+    elif (
+        "tiktok.com" in host
+        or "douyin.com" in host
+        or "instagram.com" in host
+        or host in {"fb.watch", "instagr.am"}
+    ):
         query = []
     return urlunsplit(("https", parts.netloc, parts.path.rstrip("/"), urlencode(query), ""))
 
@@ -62,6 +80,10 @@ def detect_platform(url: str) -> str:
         return "TikTok"
     if host.endswith(".douyin.com"):
         return "Douyin"
+    if host.endswith(".facebook.com"):
+        return "Facebook"
+    if host.endswith(".instagram.com"):
+        return "Instagram"
     return "Trang khác"
 
 
@@ -72,4 +94,3 @@ def format_duration(seconds: int | None) -> str:
     hours, rest = divmod(seconds, 3600)
     minutes, secs = divmod(rest, 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
-

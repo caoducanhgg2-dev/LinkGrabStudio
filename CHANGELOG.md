@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0
+
+- Thêm nhận diện và tải video/Reels từ Facebook và Instagram.
+- Hỗ trợ dán nhiều link Facebook/Instagram, xem trước rồi chọn video cần tải.
+- Dùng chung lựa chọn chất lượng, định dạng, hàng đợi và tiến trình tải hiện có.
+- Chuẩn hóa link chia sẻ và bỏ tham số theo dõi nhưng vẫn giữ ID video cần thiết.
+- Mở rộng chống trùng riêng cho Facebook và Instagram.
+- Hỗ trợ cookies.txt cho bài đăng mà tài khoản người dùng được phép xem.
+- Giữ nguyên YouTube, TikTok, Douyin, lịch sử, cài đặt, backup và rollback.
+
 ## 1.3.6
 
 - Thu gọn thanh chọn chế độ và rút ngắn chiều cao ô nhập từ khóa/link.

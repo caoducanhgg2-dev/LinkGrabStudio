@@ -333,3 +333,42 @@ def test_force_reload_adds_force_overwrites(tmp_path: Path) -> None:
     )
     command = engine.build_download_command("https://youtu.be/abc", options)
     assert "--force-overwrites" in command
+
+
+def test_social_video_metadata_maps_platform_and_duplicate_key() -> None:
+    facebook = DownloaderEngine._video_from_json(
+        {
+            "id": "fb-123",
+            "title": "Facebook Reel",
+            "webpage_url": "https://www.facebook.com/reel/123",
+            "extractor_key": "Facebook",
+        },
+        fallback_url="https://www.facebook.com/reel/123",
+    )
+    instagram = DownloaderEngine._video_from_json(
+        {
+            "id": "ig-456",
+            "title": "Instagram Reel",
+            "webpage_url": "https://www.instagram.com/reel/ABC456/",
+            "extractor_key": "Instagram",
+        },
+        fallback_url="https://www.instagram.com/reel/ABC456/",
+    )
+    assert facebook.platform == "Facebook"
+    assert facebook.unique_key == "facebook:fb-123"
+    assert instagram.platform == "Instagram"
+    assert instagram.unique_key == "instagram:ig-456"
+
+
+def test_social_download_uses_configured_cookies(tmp_path: Path) -> None:
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    engine = DownloaderEngine()
+    engine.ytdlp = Path("yt-dlp.exe")
+    engine.ffmpeg = Path("missing-ffmpeg.exe")
+    engine.deno = Path("missing-deno.exe")
+    options = DownloadOptions(output_dir=tmp_path, cookies_file=cookie_file)
+    url = "https://www.instagram.com/reel/ABC456/"
+    command = engine.build_download_command(url, options)
+    assert command[command.index("--cookies") + 1] == str(cookie_file)
+    assert command[-1] == url

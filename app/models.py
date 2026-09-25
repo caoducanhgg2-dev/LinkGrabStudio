@@ -42,6 +42,10 @@ class VideoInfo:
             source = "tiktok"
         elif source.startswith("douyin"):
             source = "douyin"
+        elif source.startswith("facebook"):
+            source = "facebook"
+        elif source.startswith("instagram"):
+            source = "instagram"
         return f"{source}:{self.video_id}"
 
 

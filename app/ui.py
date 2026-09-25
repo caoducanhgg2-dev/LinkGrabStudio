@@ -77,7 +77,7 @@ class DownloadPage(QWidget):
         title_row = QHBoxLayout()
         title = QLabel("Tải video ngay")
         title.setObjectName("sectionTitle")
-        subtitle = QLabel("Dán link YouTube hoặc TikTok — app tự nhận diện nền tảng")
+        subtitle = QLabel("Dán link YouTube, TikTok, Douyin, Facebook hoặc Instagram")
         subtitle.setObjectName("muted")
         title_row.addWidget(title)
         title_row.addSpacing(12)
@@ -98,7 +98,14 @@ class DownloadPage(QWidget):
         self.platform_group = QButtonGroup(self)
         self.platform_group.setExclusive(True)
         self.platform_buttons: dict[str, QPushButton] = {}
-        for index, (label, icon) in enumerate((("YouTube", "▶"), ("TikTok", "♪"), ("Douyin", "◉"))):
+        platforms = (
+            ("YouTube", "▶"),
+            ("TikTok", "♪"),
+            ("Douyin", "◉"),
+            ("Facebook", "f"),
+            ("Instagram", "◎"),
+        )
+        for index, (label, icon) in enumerate(platforms):
             button = QPushButton(f"{icon}  {label}")
             button.setObjectName("platform")
             button.setCheckable(True)
@@ -107,10 +114,6 @@ class DownloadPage(QWidget):
             self.platform_buttons[label] = button
             button.clicked.connect(self._platform_changed)
             platform_row.addWidget(button)
-        more = QPushButton("＋ Nền tảng khác (sắp có)")
-        more.setObjectName("platform")
-        more.setEnabled(False)
-        platform_row.addWidget(more)
         platform_row.addStretch()
         source_layout.addLayout(platform_row)
 
@@ -143,7 +146,9 @@ class DownloadPage(QWidget):
         mode_row.addStretch()
         form.addLayout(mode_row)
 
-        channel_hint = QLabel("Từ khóa: YouTube/Douyin • dịch tiếng Trung • tự nhận diện video trùng")
+        channel_hint = QLabel(
+            "Link: 5 nền tảng • Từ khóa: YouTube/Douyin • tự nhận diện video trùng"
+        )
         channel_hint.setObjectName("countBadge")
         channel_hint.setWordWrap(True)
         form.addWidget(channel_hint)
@@ -159,7 +164,7 @@ class DownloadPage(QWidget):
         self.url_input.setPlaceholderText(
             "Dán link vào đây. Ví dụ:\n"
             "https://www.youtube.com/watch?v=...\n"
-            "https://www.tiktok.com/@user/video/..."
+            "https://www.facebook.com/reel/... hoặc https://www.instagram.com/reel/..."
         )
         self.url_input.setMinimumHeight(62)
         self.url_input.setMaximumHeight(76)
@@ -642,7 +647,7 @@ class DownloadPage(QWidget):
             self.url_label.setText("Link video — mỗi dòng một link")
             self.url_input.setPlaceholderText(
                 "Dán link vào đây. Ví dụ:\nhttps://www.youtube.com/watch?v=...\n"
-                "https://www.tiktok.com/@user/video/..."
+                "https://www.facebook.com/reel/... hoặc https://www.instagram.com/reel/..."
             )
         self._update_link_summary()
 
@@ -785,7 +790,7 @@ class SettingsPage(QWidget):
         self.skip_duplicates = QCheckBox("Tự động bỏ qua video đã tải")
         self.skip_duplicates.setChecked(settings.skip_duplicates)
         grid.addWidget(self.skip_duplicates, 1, 0, 1, 2)
-        grid.addWidget(QLabel("Cookies.txt thủ công (dự phòng)"), 2, 0)
+        grid.addWidget(QLabel("Cookies.txt (Douyin/Facebook/Instagram)"), 2, 0)
         cookie_row = QHBoxLayout()
         self.cookies = QLineEdit(settings.cookies_file)
         choose = QPushButton("Chọn file")
@@ -879,7 +884,7 @@ class MainWindow(QMainWindow):
         self.preview_pool = QThreadPool(self)
         self.preview_pool.setMaxThreadCount(1)
         self.queue = QueueController(self.engine, self.database, self.settings.concurrency)
-        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Đăng nhập Douyin")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — Tải video đa nền tảng")
         self.resize(1450, 890)
         self.setMinimumSize(1100, 700)
         self.setStyleSheet(APP_STYLE)
@@ -920,7 +925,7 @@ class MainWindow(QMainWindow):
             if index == 0:
                 button.setChecked(True)
         side_layout.addStretch()
-        version = QLabel(f"Bản {APP_VERSION}\nĐăng nhập Douyin\nWindows 10/11")
+        version = QLabel(f"Bản {APP_VERSION}\n5 nền tảng\nWindows 10/11")
         version.setObjectName("muted")
         side_layout.addWidget(version)
         root.addWidget(sidebar)
