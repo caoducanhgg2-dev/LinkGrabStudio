@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.1
+
+- Khắc phục triệt để vòng lặp báo “Video cần đăng nhập” khi tìm từ khóa Douyin.
+- Loại bỏ nhánh đưa link Douyin từ kết quả dự phòng trở lại API chi tiết của yt-dlp.
+- Mở từng trang video trong Firefox có phiên đăng nhập và lấy luồng phát đã được Douyin cấp quyền.
+- Chuẩn hóa miền cookie trước khi nạp vào Firefox tạm, tránh Firefox âm thầm từ chối cookie `.douyin.com`.
+- Phân biệt rõ lỗi thiếu Firefox/Deno, không nạp được cookie, CAPTCHA và trang không trả luồng phát.
+- Kiểm tra cú pháp cả cầu nối tìm kiếm lẫn cầu nối đọc trang video trong quy trình build Windows.
+- Giữ nguyên lịch sử, đăng nhập, chống trùng, checksum, backup và rollback.
+
 ## 1.6.0
 
 - Thêm cầu nối tìm kiếm Douyin trực tiếp qua Firefox đã đăng nhập.

@@ -55,6 +55,7 @@ class DownloaderEngine:
         self.deno = find_binary("deno")
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._lock = threading.RLock()
+        self._douyin_bridge_last_error = ""
 
     @property
     def is_ready(self) -> bool:
@@ -216,7 +217,23 @@ class DownloaderEngine:
                         "nhưng Douyin đang yêu cầu xác minh tìm kiếm. Hãy mở Douyin trong trình duyệt, "
                         "tìm thử một lần rồi bấm Làm mới đăng nhập trong Cài đặt."
                     )
-                videos = self._preview_douyin_urls(urls, cookies_file=cookies_file)
+                # Never send an indexed Douyin URL back to yt-dlp here.  The
+                # detail endpoint used by yt-dlp requires a fresh anti-bot
+                # signature and was the source of the recurring “cần đăng nhập”
+                # error.  Resolve the pages inside the authenticated browser
+                # instead, then download their already-authorized media URLs.
+                resolve_limit = max(1, min(len(urls), options.search_limit * 2))
+                videos = self._resolve_douyin_urls_with_firefox(
+                    urls[:resolve_limit], cookies_file=cookies_file
+                )
+                if not videos:
+                    detail = self._douyin_bridge_last_error or (
+                        "Firefox đã mở trang Douyin nhưng trang không cung cấp địa chỉ phát video."
+                    )
+                    raise DownloaderError(
+                        "Đã tìm thấy link Douyin nhưng cầu nối trình duyệt không đọc được video. "
+                        "Chi tiết: " + detail
+                    )
                 for video in videos:
                     video.raw["search_query_original"] = clean_query
                     video.raw["search_query_translated"] = translated_query
@@ -403,13 +420,17 @@ class DownloaderEngine:
         cookies_file: Path | None = None,
     ) -> list[str]:
         """Use Firefox WebDriver BiDi to capture Douyin's own signed search JSON."""
+        self._douyin_bridge_last_error = ""
         if os.name != "nt":
+            self._douyin_bridge_last_error = "Cầu nối Douyin chỉ hỗ trợ bản Windows."
             return []
         deno_path = Path(str(self.deno))
         if not deno_path.is_file():
+            self._douyin_bridge_last_error = "Gói cập nhật thiếu deno.exe."
             return []
         firefox = self._find_firefox_executable()
         if not firefox:
+            self._douyin_bridge_last_error = "Không tìm thấy Mozilla Firefox trên máy."
             return []
         port = self._free_local_port()
         bridge_profile = Path(tempfile.mkdtemp(prefix="LinkGrabStudio_Douyin_"))
@@ -436,7 +457,8 @@ class DownloaderEngine:
                 stderr=subprocess.DEVNULL,
                 creationflags=creationflags,
             )
-        except OSError:
+        except OSError as exc:
+            self._douyin_bridge_last_error = f"Không mở được Firefox: {exc}"
             shutil.rmtree(bridge_profile, ignore_errors=True)
             return []
 
@@ -451,7 +473,8 @@ class DownloaderEngine:
         ]
         try:
             result = self._run_capture(command, timeout=180)
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._douyin_bridge_last_error = f"Cầu nối Firefox không chạy được: {exc}"
             return []
         finally:
             if browser_process and browser_process.poll() is None:
@@ -467,12 +490,147 @@ class DownloaderEngine:
             "",
         )
         if not payload_line:
+            diagnostic = (result.stderr or result.stdout or "").strip().splitlines()
+            self._douyin_bridge_last_error = (
+                diagnostic[-1][:350]
+                if diagnostic
+                else f"Firefox không trả dữ liệu (mã {result.returncode})."
+            )
             return []
         try:
             bodies = json.loads(payload_line)
         except json.JSONDecodeError:
+            self._douyin_bridge_last_error = "Dữ liệu cầu nối Firefox không hợp lệ."
             return []
-        return [str(body) for body in bodies if isinstance(body, str) and body.strip()]
+        parsed = [str(body) for body in bodies if isinstance(body, str) and body.strip()]
+        if not parsed:
+            self._douyin_bridge_last_error = (
+                "Trang tìm kiếm Douyin đã mở nhưng không trả dữ liệu video; "
+                "có thể đang hiện CAPTCHA/xác minh."
+            )
+        return parsed
+
+    def _resolve_douyin_urls_with_firefox(
+        self,
+        urls: list[str],
+        *,
+        cookies_file: Path | None = None,
+    ) -> list[VideoInfo]:
+        """Resolve Douyin pages in Firefox without calling yt-dlp's detail API."""
+        self._douyin_bridge_last_error = ""
+        normalized = [self._normalize_douyin_video_url(url) for url in urls]
+        normalized = list(dict.fromkeys(url for url in normalized if url))
+        if not normalized:
+            self._douyin_bridge_last_error = "Danh sách link Douyin không hợp lệ."
+            return []
+        if os.name != "nt":
+            self._douyin_bridge_last_error = "Cầu nối Douyin chỉ hỗ trợ bản Windows."
+            return []
+        deno_path = Path(str(self.deno))
+        if not deno_path.is_file():
+            self._douyin_bridge_last_error = "Gói cập nhật thiếu deno.exe."
+            return []
+        firefox = self._find_firefox_executable()
+        if not firefox:
+            self._douyin_bridge_last_error = (
+                "Không tìm thấy Mozilla Firefox. Hãy cài Firefox rồi bấm Kiểm tra lại đăng nhập."
+            )
+            return []
+
+        port = self._free_local_port()
+        bridge_profile = Path(tempfile.mkdtemp(prefix="LinkGrabStudio_Douyin_"))
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        browser_process = None
+        try:
+            browser_process = subprocess.Popen(
+                [
+                    str(firefox), "-no-remote", "-profile", str(bridge_profile),
+                    "--remote-debugging-port", str(port), "-new-window", "about:blank",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+        except OSError as exc:
+            self._douyin_bridge_last_error = f"Không mở được Firefox: {exc}"
+            shutil.rmtree(bridge_profile, ignore_errors=True)
+            return []
+
+        cookie_path = str(cookies_file) if cookies_file and cookies_file.is_file() else ""
+        script = self._douyin_resolver_bidi_script(port, normalized, cookie_path)
+        command = [
+            str(deno_path), "eval", f"--allow-net=127.0.0.1:{port}",
+            *([f"--allow-read={cookie_path}"] if cookie_path else []), script,
+        ]
+        try:
+            result = self._run_capture(command, timeout=max(180, len(normalized) * 25))
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._douyin_bridge_last_error = f"Cầu nối Firefox không chạy được: {exc}"
+            return []
+        finally:
+            if browser_process and browser_process.poll() is None:
+                try:
+                    browser_process.terminate()
+                    browser_process.wait(timeout=10)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            shutil.rmtree(bridge_profile, ignore_errors=True)
+
+        marker = "__LINKGRAB_DOUYIN_VIDEOS__"
+        payload_line = next(
+            (line[len(marker):] for line in result.stdout.splitlines() if line.startswith(marker)),
+            "",
+        )
+        if not payload_line:
+            diagnostic = (result.stderr or result.stdout or "").strip().splitlines()
+            self._douyin_bridge_last_error = (
+                diagnostic[-1][:350]
+                if diagnostic
+                else f"Firefox không trả dữ liệu (mã {result.returncode})."
+            )
+            return []
+        try:
+            payload = json.loads(payload_line)
+        except json.JSONDecodeError:
+            self._douyin_bridge_last_error = "Dữ liệu video từ Firefox không hợp lệ."
+            return []
+
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        diagnostics = payload.get("diagnostics", []) if isinstance(payload, dict) else []
+        videos: list[VideoInfo] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            source_url = self._normalize_douyin_video_url(str(item.get("url") or ""))
+            match = re.search(r"/video/(\d{12,})", source_url)
+            direct_url = str(item.get("direct_url") or "")
+            if not match or not direct_url.startswith(("http://", "https://")):
+                continue
+            video_id = match.group(1)
+            direct_url = direct_url.replace("http://", "https://", 1)
+            title = str(item.get("title") or f"Douyin {video_id}").strip()
+            raw = dict(item)
+            raw["direct_url"] = direct_url
+            videos.append(
+                VideoInfo(
+                    url=source_url,
+                    video_id=video_id,
+                    title=title,
+                    platform="Douyin",
+                    uploader=str(item.get("uploader") or ""),
+                    thumbnail=str(item.get("thumbnail") or ""),
+                    webpage_url=source_url,
+                    extractor="DouyinBrowser",
+                    raw=raw,
+                )
+            )
+        if not videos:
+            detail = next((str(value) for value in diagnostics if value), "")
+            self._douyin_bridge_last_error = detail[:350] or (
+                "Trang video đã mở nhưng không có luồng phát HTTP; "
+                "hãy hoàn tất CAPTCHA/xác minh trong Firefox rồi thử lại."
+            )
+        return videos
 
     @staticmethod
     def _find_firefox_executable() -> Path | None:
@@ -559,7 +717,7 @@ try {{
         const cookie = {{
           name,
           value: {{type: "string", value}},
-          domain,
+          domain: domain.replace(/^\\./, ""),
           path: path || "/",
           secure: secureText.toUpperCase() === "TRUE",
           httpOnly,
@@ -622,6 +780,182 @@ try {{
   Deno.exit(3);
 }}
 '''
+
+    @staticmethod
+    def _douyin_resolver_bidi_script(
+        port: int,
+        urls: list[str],
+        cookie_path: str = "",
+    ) -> str:
+        """Return a BiDi client that resolves real media URLs from video pages."""
+        template = r'''
+const endpoint = "ws://127.0.0.1:__PORT__/session";
+const targetUrls = __URLS__;
+const cookiePath = __COOKIE_PATH__;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let ws;
+for (let attempt = 0; attempt < 60; attempt++) {
+  try {
+    ws = new WebSocket(endpoint);
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("open timeout")), 1000);
+      ws.onopen = () => { clearTimeout(timer); resolve(); };
+      ws.onerror = () => { clearTimeout(timer); reject(new Error("open failed")); };
+    });
+    break;
+  } catch (_) {
+    try { ws?.close(); } catch (_) {}
+    ws = undefined;
+    await delay(500);
+  }
+}
+if (!ws) Deno.exit(2);
+let nextId = 0;
+const waiting = new Map();
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  if (!message.id || !waiting.has(message.id)) return;
+  const pending = waiting.get(message.id);
+  waiting.delete(message.id);
+  if (message.type === "error") pending.reject(new Error(message.message || message.error));
+  else pending.resolve(message.result);
+};
+const send = (method, params = {}, timeoutMs = 30000) => new Promise((resolve, reject) => {
+  const id = ++nextId;
+  waiting.set(id, {resolve, reject});
+  ws.send(JSON.stringify({id, method, params}));
+  setTimeout(() => {
+    if (!waiting.has(id)) return;
+    waiting.delete(id);
+    reject(new Error(method + " timeout"));
+  }, timeoutMs);
+});
+const diagnostics = [];
+const items = [];
+try {
+  await send("session.new", {capabilities: {alwaysMatch: {acceptInsecureCerts: false}}});
+  const tree = await send("browsingContext.getTree", {maxDepth: 0});
+  const contexts = tree.contexts || [];
+  if (!contexts.length) throw new Error("Firefox không tạo được thẻ trình duyệt");
+  const context = contexts[0].context;
+  let cookieCount = 0;
+  let cookieFailures = 0;
+  if (cookiePath) {
+    try {
+      const cookieText = await Deno.readTextFile(cookiePath);
+      for (const rawLine of cookieText.split(/\r?\n/)) {
+        let line = rawLine.trim();
+        let httpOnly = false;
+        if (line.startsWith("#HttpOnly_")) {
+          httpOnly = true;
+          line = line.slice("#HttpOnly_".length);
+        } else if (!line || line.startsWith("#")) {
+          continue;
+        }
+        const fields = line.split("\t");
+        if (fields.length < 7) continue;
+        const [rawDomain, , path, secureText, expiryText, name, value] = fields;
+        if (!rawDomain.toLowerCase().includes("douyin.com") || !name || !value) continue;
+        const cookie = {
+          name,
+          value: {type: "string", value},
+          domain: rawDomain.replace(/^\./, ""),
+          path: path || "/",
+          secure: secureText.toUpperCase() === "TRUE",
+          httpOnly,
+        };
+        const expiry = Number(expiryText || 0);
+        if (Number.isFinite(expiry) && expiry > 0) cookie.expiry = Math.floor(expiry);
+        try {
+          await send("storage.setCookie", {cookie});
+          cookieCount++;
+        } catch (_) {
+          cookieFailures++;
+        }
+      }
+    } catch (error) {
+      diagnostics.push("Không đọc được tệp phiên đăng nhập: " + String(error));
+    }
+  }
+  if (!cookieCount) diagnostics.push("Không nạp được cookie Douyin vào Firefox tạm.");
+  if (cookieFailures) diagnostics.push("Có " + cookieFailures + " cookie bị Firefox từ chối.");
+
+  for (const targetUrl of targetUrls) {
+    try {
+      await send(
+        "browsingContext.navigate",
+        {context, url: targetUrl, wait: "interactive"},
+        60000,
+      );
+      const expression = `(async () => {
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const httpUrl = (value) => typeof value === "string" && /^https?:\\/\\//i.test(value);
+        const mediaResources = () => performance.getEntriesByType("resource")
+          .map((entry) => entry.name)
+          .filter((url) => httpUrl(url) && (
+            /\\.(?:mp4|m3u8)(?:[?#]|$)/i.test(url) ||
+            /video\\/tos|douyinvod|bytevc|mime_type=video|video_id=/i.test(url)
+          ));
+        for (let round = 0; round < 16; round++) {
+          const video = document.querySelector("video");
+          if (video) {
+            try { await video.play(); } catch (_) {}
+            if (httpUrl(video.currentSrc) || httpUrl(video.src) || mediaResources().length) break;
+          }
+          window.scrollBy(0, Math.max(300, window.innerHeight / 2));
+          await sleep(500);
+        }
+        const video = document.querySelector("video");
+        const sources = video ? [...video.querySelectorAll("source")].map((node) => node.src) : [];
+        const direct = [video?.currentSrc, video?.src, ...sources, ...mediaResources()]
+          .find((value) => httpUrl(value)) || "";
+        const meta = (name) => document.querySelector(
+          'meta[property="' + name + '"],meta[name="' + name + '"]'
+        )?.content || "";
+        return JSON.stringify({
+          url: location.href,
+          title: meta("og:title") || document.title || "",
+          uploader: meta("author") || "",
+          thumbnail: meta("og:image") || "",
+          direct_url: direct,
+          challenge: /验证码|安全验证|captcha|verify/i.test(document.body?.innerText || ""),
+        });
+      })()`;
+      const evaluated = await send("script.evaluate", {
+        expression,
+        target: {context},
+        awaitPromise: true,
+        resultOwnership: "none",
+      }, 30000);
+      const value = evaluated?.result?.value || "{}";
+      const item = JSON.parse(value);
+      if (!item.url || !String(item.url).includes("/video/")) item.url = targetUrl;
+      items.push(item);
+      if (!item.direct_url) {
+        diagnostics.push(
+          item.challenge
+            ? "Douyin đang hiện CAPTCHA/xác minh cho " + targetUrl
+            : "Trang không trả luồng phát cho " + targetUrl
+        );
+      }
+    } catch (error) {
+      diagnostics.push("Không mở được " + targetUrl + ": " + String(error));
+    }
+  }
+  console.log("__LINKGRAB_DOUYIN_VIDEOS__" + JSON.stringify({items, diagnostics}));
+  try { await send("browser.close", {}); } catch (_) {}
+  ws.close();
+} catch (error) {
+  console.error("Cầu nối Douyin: " + String(error));
+  try { ws.close(); } catch (_) {}
+  Deno.exit(3);
+}
+'''
+        return (
+            template.replace("__PORT__", str(port))
+            .replace("__URLS__", json.dumps(urls, ensure_ascii=False))
+            .replace("__COOKIE_PATH__", json.dumps(cookie_path, ensure_ascii=False))
+        )
 
     @classmethod
     def _extract_douyin_search_videos(cls, body: str) -> list[VideoInfo]:

@@ -247,7 +247,7 @@ def test_douyin_keyword_search_uses_indexed_direct_video_urls(monkeypatch) -> No
     )
     monkeypatch.setattr(
         engine,
-        "_preview_douyin_urls",
+        "_resolve_douyin_urls_with_firefox",
         lambda urls, cookies_file=None: [
             VideoInfo(
                 url=urls[0],
@@ -277,6 +277,50 @@ def test_douyin_keyword_search_uses_indexed_direct_video_urls(monkeypatch) -> No
     assert videos[0].unique_key == "douyin:729001"
     assert videos[0].raw["search_query_original"] == "mukbang"
     assert videos[0].raw["search_query_translated"] == "吃播"
+
+
+def test_douyin_keyword_search_never_returns_to_ytdlp_detail_api(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    monkeypatch.setattr(
+        engine,
+        "_search_douyin_authenticated",
+        lambda query, limit, cookies_file=None: (
+            [], ["https://www.douyin.com/video/7390012345678901234"]
+        ),
+    )
+    monkeypatch.setattr(
+        engine,
+        "_resolve_douyin_urls_with_firefox",
+        lambda urls, cookies_file=None: [
+            VideoInfo(
+                url=urls[0],
+                video_id="7390012345678901234",
+                title="Browser result",
+                platform="Douyin",
+                webpage_url=urls[0],
+                extractor="DouyinBrowser",
+                raw={"direct_url": "https://video.example.test/play.mp4"},
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        engine,
+        "_preview_douyin_urls",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("yt-dlp Douyin detail fallback must not run")
+        ),
+    )
+    videos = engine.preview_search(
+        ["mukbang"],
+        PreviewOptions(
+            keyword_search=True,
+            search_platform="Douyin",
+            search_limit=10,
+            search_scan_limit=20,
+            since_days=0,
+        ),
+    )
+    assert videos[0].raw["direct_url"].endswith("play.mp4")
 
 
 def test_douyin_authenticated_search_reads_hydration_and_sends_cookies(
@@ -456,6 +500,18 @@ def test_douyin_bidi_script_reads_signed_search_responses() -> None:
     assert "performance.getEntriesByType" in script
     assert "storage.setCookie" in script
     assert "__LINKGRAB_DOUYIN_JSON__" in script
+
+
+def test_douyin_resolver_script_reads_video_element_and_reports_challenge() -> None:
+    script = DownloaderEngine._douyin_resolver_bidi_script(
+        9223, ["https://www.douyin.com/video/7390012345678901234"], "cookies.txt"
+    )
+    assert "ws://127.0.0.1:9223/session" in script
+    assert "video.currentSrc" in script
+    assert "mediaResources" in script
+    assert "CAPTCHA/xác minh" in script
+    assert "__LINKGRAB_DOUYIN_VIDEOS__" in script
+    assert 'domain: rawDomain.replace(/^\\./, "")' in script
 
 
 def test_douyin_direct_media_download_keeps_title_and_source(monkeypatch, tmp_path: Path) -> None:
