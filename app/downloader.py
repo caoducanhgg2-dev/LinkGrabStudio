@@ -896,14 +896,20 @@ try {
             /\\.(?:mp4|m3u8)(?:[?#]|$)/i.test(url) ||
             /video\\/tos|douyinvod|bytevc|mime_type=video|video_id=/i.test(url)
           ));
-        for (let round = 0; round < 16; round++) {
+        let challenge = false;
+        for (let round = 0; round < 60; round++) {
           const video = document.querySelector("video");
           if (video) {
             try { await video.play(); } catch (_) {}
             if (httpUrl(video.currentSrc) || httpUrl(video.src) || mediaResources().length) break;
           }
+          challenge = /验证码|安全验证|captcha|verify/i.test(document.body?.innerText || "");
+          // A normal page should expose its player quickly.  A verification
+          // page remains visible for up to one minute so the user can complete
+          // it in the Firefox window instead of the app closing it immediately.
+          if (round >= 12 && !challenge) break;
           window.scrollBy(0, Math.max(300, window.innerHeight / 2));
-          await sleep(500);
+          await sleep(1000);
         }
         const video = document.querySelector("video");
         const sources = video ? [...video.querySelectorAll("source")].map((node) => node.src) : [];
@@ -918,7 +924,7 @@ try {
           uploader: meta("author") || "",
           thumbnail: meta("og:image") || "",
           direct_url: direct,
-          challenge: /验证码|安全验证|captcha|verify/i.test(document.body?.innerText || ""),
+          challenge,
         });
       })()`;
       const evaluated = await send("script.evaluate", {
@@ -937,6 +943,7 @@ try {
             ? "Douyin đang hiện CAPTCHA/xác minh cho " + targetUrl
             : "Trang không trả luồng phát cho " + targetUrl
         );
+        if (item.challenge) break;
       }
     } catch (error) {
       diagnostics.push("Không mở được " + targetUrl + ": " + String(error));

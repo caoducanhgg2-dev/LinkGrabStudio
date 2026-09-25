@@ -510,6 +510,8 @@ def test_douyin_resolver_script_reads_video_element_and_reports_challenge() -> N
     assert "video.currentSrc" in script
     assert "mediaResources" in script
     assert "CAPTCHA/xác minh" in script
+    assert "round < 60" in script
+    assert "if (item.challenge) break" in script
     assert "__LINKGRAB_DOUYIN_VIDEOS__" in script
     assert 'domain: rawDomain.replace(/^\\./, "")' in script
 
