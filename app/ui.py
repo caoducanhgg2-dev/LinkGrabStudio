@@ -42,7 +42,7 @@ from .downloader import DownloaderEngine
 from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions, VideoInfo
 from .styles import APP_STYLE
 from .updater import EngineUpdater
-from .utils import detect_platform, extract_urls, format_duration
+from .utils import detect_platform, extract_urls, format_duration, supports_keyword_search
 from .workers import DouyinAuthWorker, EngineUpdateWorker, PreviewWorker, QueueController
 
 
@@ -146,12 +146,12 @@ class DownloadPage(QWidget):
         mode_row.addStretch()
         form.addLayout(mode_row)
 
-        channel_hint = QLabel(
+        self.mode_hint = QLabel(
             "Link: 5 nền tảng • Từ khóa: YouTube/Douyin • tự nhận diện video trùng"
         )
-        channel_hint.setObjectName("countBadge")
-        channel_hint.setWordWrap(True)
-        form.addWidget(channel_hint)
+        self.mode_hint.setObjectName("countBadge")
+        self.mode_hint.setWordWrap(True)
+        form.addWidget(self.mode_hint)
 
         self.keyword_mode.clicked.connect(self._update_mode_ui)
         self.link_mode.clicked.connect(self._update_mode_ui)
@@ -619,15 +619,23 @@ class DownloadPage(QWidget):
     def _update_mode_ui(self) -> None:
         is_channel = self.channel_mode.isChecked()
         is_search = self.keyword_mode.isChecked()
+        platform = self.selected_platform()
+        if is_search and not supports_keyword_search(platform):
+            self.link_mode.setChecked(True)
+            is_search = False
+            is_channel = False
+            self.mode_hint.setText(
+                f"{platform} chưa hỗ trợ tìm từ khóa • đã giữ {platform} và chuyển sang chế độ Link"
+            )
+        else:
+            self.mode_hint.setText(
+                "Link: 5 nền tảng • Từ khóa: YouTube/Douyin • tự nhận diện video trùng"
+            )
         self.channel_filters.setVisible(is_channel)
         self.search_filters.setVisible(is_search)
-        for name, button in self.platform_buttons.items():
-            button.setEnabled(not is_search or name in {"YouTube", "Douyin"})
+        for button in self.platform_buttons.values():
+            button.setEnabled(True)
         if is_search:
-            platform = self.selected_platform()
-            if platform not in {"YouTube", "Douyin"}:
-                self.platform_buttons["YouTube"].setChecked(True)
-                platform = "YouTube"
             if platform == "Douyin" and self.search_language.currentData() == "original":
                 translated_index = self.search_language.findData("zh-cn")
                 if translated_index >= 0:
@@ -657,12 +665,13 @@ class DownloadPage(QWidget):
         return "YouTube"
 
     def _platform_changed(self) -> None:
-        if not hasattr(self, "keyword_mode") or not self.keyword_mode.isChecked():
+        if not hasattr(self, "keyword_mode"):
             return
-        target = "zh-cn" if self.selected_platform() == "Douyin" else "original"
-        index = self.search_language.findData(target)
-        if index >= 0:
-            self.search_language.setCurrentIndex(index)
+        if self.keyword_mode.isChecked() and supports_keyword_search(self.selected_platform()):
+            target = "zh-cn" if self.selected_platform() == "Douyin" else "original"
+            index = self.search_language.findData(target)
+            if index >= 0:
+                self.search_language.setCurrentIndex(index)
         self._update_mode_ui()
 
 

@@ -28,6 +28,12 @@ SUPPORTED_HOSTS = {
     "instagr.am": "Instagram",
 }
 
+KEYWORD_SEARCH_PLATFORMS = {"YouTube", "Douyin"}
+
+
+def supports_keyword_search(platform: str) -> bool:
+    return platform in KEYWORD_SEARCH_PLATFORMS
+
 
 def extract_urls(text: str) -> list[str]:
     candidates = re.findall(r"https?://[^\s<>\"']+", text or "", flags=re.IGNORECASE)

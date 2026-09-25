@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.1
+
+- Thay icon LinkGrab mới trên file EXE, thanh tiêu đề và shortcut Windows.
+- Sửa lỗi chọn Từ khóa trên TikTok/Facebook/Instagram làm nền tảng nhảy về YouTube.
+- Luôn giữ nguyên nền tảng người dùng đã chọn.
+- Nếu nền tảng chưa hỗ trợ tìm từ khóa, app chuyển sang Link và hiển thị lý do rõ ràng.
+- Cho phép đổi trực tiếp giữa cả năm nền tảng mà không khóa các nút nền tảng.
+- Giữ nguyên cookies riêng, lịch sử, chống trùng, backup và rollback của bản 1.4.0.
+
 ## 1.4.0
 
 - Thêm nhận diện và tải video/Reels từ Facebook và Instagram.

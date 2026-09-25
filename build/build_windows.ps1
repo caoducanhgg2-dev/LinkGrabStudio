@@ -25,6 +25,7 @@ python -m PyInstaller `
     --windowed `
     --onedir `
     --name "LinkGrabStudio" `
+    --icon "$ProjectRoot\assets\linkgrab.ico" `
     --distpath "dist" `
     --workpath "build\pyinstaller" `
     --specpath "build\pyinstaller" `
@@ -36,6 +37,7 @@ $AppExe = Join-Path $ProjectRoot "dist\LinkGrabStudio\LinkGrabStudio.exe"
 if (-not (Test-Path $AppExe)) {
     throw "Build failed: LinkGrabStudio.exe was not created"
 }
+Copy-Item "$ProjectRoot\assets\linkgrab.png" (Join-Path (Split-Path $AppExe -Parent) "linkgrab.png") -Force
 
 Write-Host "Portable build ready: $AppExe"
 

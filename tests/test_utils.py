@@ -1,4 +1,10 @@
-from app.utils import detect_platform, extract_urls, format_duration, normalize_url
+from app.utils import (
+    detect_platform,
+    extract_urls,
+    format_duration,
+    normalize_url,
+    supports_keyword_search,
+)
 
 
 def test_extract_urls_deduplicates_and_removes_tracking() -> None:
@@ -41,3 +47,11 @@ def test_format_duration() -> None:
     assert format_duration(65) == "01:05"
     assert format_duration(3661) == "01:01:01"
     assert format_duration(None) == "—"
+
+
+def test_keyword_search_platform_support_is_explicit() -> None:
+    assert supports_keyword_search("YouTube")
+    assert supports_keyword_search("Douyin")
+    assert not supports_keyword_search("TikTok")
+    assert not supports_keyword_search("Facebook")
+    assert not supports_keyword_search("Instagram")

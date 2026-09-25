@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.4.0"
+    [string]$Version = "1.4.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,16 +20,19 @@ Remove-Item $OutputZip -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $PayloadDir | Out-Null
 
 Copy-Item $BuiltExe (Join-Path $PayloadDir "LinkGrabStudio.exe") -Force
+Copy-Item (Join-Path $ProjectRoot "assets\linkgrab.png") (Join-Path $PayloadDir "linkgrab.png") -Force
 Copy-Item (Join-Path $PSScriptRoot "Apply_Update_1.1.ps1") $PackageDir -Force
 Copy-Item (Join-Path $PSScriptRoot "CapNhat_1.1.cmd") $PackageDir -Force
 Copy-Item (Join-Path $PSScriptRoot "HUONG_DAN_CAP_NHAT_1.1.txt") $PackageDir -Force
 
 $Hash = (Get-FileHash (Join-Path $PayloadDir "LinkGrabStudio.exe") -Algorithm SHA256).Hash.ToLowerInvariant()
+$IconHash = (Get-FileHash (Join-Path $PayloadDir "linkgrab.png") -Algorithm SHA256).Hash.ToLowerInvariant()
 $Manifest = [ordered]@{
     product = "LinkGrab Studio"
     version = $Version
     minimum_version = "1.0.0-preview.1"
     sha256 = $Hash
+    icon_sha256 = $IconHash
     preserves_user_data = $true
     rollback = $true
 }
