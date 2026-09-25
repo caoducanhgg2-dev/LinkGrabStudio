@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 APP_NAME = "LinkGrab Studio"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 APP_DIR_NAME = "LinkGrabStudio"
 
 
@@ -36,8 +36,8 @@ class AppSettings:
     douyin_cookies_file: str = ""
     facebook_cookies_file: str = ""
     instagram_cookies_file: str = ""
-    login_browser: str = "chrome"
-    douyin_browser: str = "chrome"
+    login_browser: str = "firefox"
+    douyin_browser: str = "firefox"
     auto_clipboard: bool = True
     skip_duplicates: bool = True
 

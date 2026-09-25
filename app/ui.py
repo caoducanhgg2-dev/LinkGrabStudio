@@ -805,6 +805,7 @@ class SettingsPage(QWidget):
         auth_header = QHBoxLayout()
         auth_header.addWidget(QLabel("Lấy đăng nhập từ"))
         self.auth_browser = QComboBox()
+        self.auth_browser.addItem("Mozilla Firefox — khuyên dùng", "firefox")
         self.auth_browser.addItem("Google Chrome", "chrome")
         self.auth_browser.addItem("Microsoft Edge", "edge")
         browser_index = self.auth_browser.findData(settings.login_browser)
@@ -863,7 +864,7 @@ class SettingsPage(QWidget):
         auth_layout.addLayout(cards)
 
         security_note = QLabel(
-            "✓ App không nhận hoặc lưu mật khẩu. Phiên đăng nhập chỉ được đọc từ Chrome/Edge trên máy này."
+            "✓ App không nhận hoặc lưu mật khẩu. Firefox được khuyên dùng trên Windows 11."
         )
         security_note.setObjectName("successNote")
         security_note.setWordWrap(True)
@@ -1147,7 +1148,11 @@ class MainWindow(QMainWindow):
 
     @Slot(str, str)
     def _open_browser_login(self, platform: str, browser: str) -> None:
-        self.browser_auth.open_login(platform, browser)
+        try:
+            self.browser_auth.open_login(platform, browser)
+        except Exception as error:
+            QMessageBox.warning(self, "Đăng nhập nền tảng", str(error))
+            return
         self.settings_page.auth_note.setText(
             f"Đang chờ đăng nhập {platform} • hoàn tất trong trình duyệt, đóng trình duyệt rồi bấm Kiểm tra lại."
         )
@@ -1200,9 +1205,29 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _browser_auth_failed(self, error) -> None:
         self.settings_page.set_auth_busy(False)
+        if getattr(error, "code", "") == "decrypt_failed":
+            firefox_index = self.settings_page.auth_browser.findData("firefox")
+            if firefox_index >= 0:
+                self.settings_page.auth_browser.setCurrentIndex(firefox_index)
+            self.settings.login_browser = "firefox"
+            self.settings.save()
+            self.settings_page.auth_note.setText(
+                "Chrome/Edge bị Windows chặn giải mã • đã chuyển sang Mozilla Firefox."
+            )
+            QMessageBox.warning(
+                self,
+                "Chrome/Edge không đọc được phiên",
+                f"{error}\n\nApp đã chuyển lựa chọn sang Mozilla Firefox. "
+                "Bấm Đăng nhập tại nền tảng cần dùng, đăng nhập bằng Firefox, "
+                "đóng Firefox rồi bấm Kiểm tra lại.",
+            )
+            return
         if getattr(error, "code", "") == "browser_locked":
             browser = getattr(self, "_auth_refresh_browser", self.settings.login_browser)
-            browser_name = "Microsoft Edge" if browser == "edge" else "Google Chrome"
+            browser_name = {
+                "edge": "Microsoft Edge",
+                "firefox": "Mozilla Firefox",
+            }.get(browser, "Google Chrome")
             message = QMessageBox(self)
             message.setIcon(QMessageBox.Warning)
             message.setWindowTitle("Trình duyệt đang khóa phiên đăng nhập")

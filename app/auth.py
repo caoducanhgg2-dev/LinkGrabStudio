@@ -80,7 +80,7 @@ PLATFORM_AUTH_ORDER = ("Douyin", "TikTok", "YouTube", "Facebook", "Instagram")
 
 
 class BrowserAuthManager:
-    """Read login sessions from Chrome/Edge without receiving user passwords."""
+    """Read browser login sessions without receiving user passwords."""
 
     def __init__(self, engine) -> None:
         self.engine = engine
@@ -141,9 +141,9 @@ class BrowserAuthManager:
 
     def refresh(self, browser: str) -> dict[str, BrowserAuthStatus]:
         browser = browser.lower().strip()
-        if browser not in {"chrome", "edge"}:
+        if browser not in {"chrome", "edge", "firefox"}:
             raise BrowserAuthError(
-                "Chỉ hỗ trợ Google Chrome hoặc Microsoft Edge.",
+                "Chỉ hỗ trợ Mozilla Firefox, Google Chrome hoặc Microsoft Edge.",
                 code="invalid_browser",
             )
 
@@ -182,9 +182,14 @@ class BrowserAuthManager:
                     code="browser_locked",
                 )
             if "decrypt" in lowered or "dpapi" in lowered:
+                if browser in {"chrome", "edge"}:
+                    raise BrowserAuthError(
+                        "Windows đang chặn giải mã phiên Chrome/Edge. "
+                        "Hãy chọn Mozilla Firefox (khuyên dùng) rồi đăng nhập lại.",
+                        code="decrypt_failed",
+                    )
                 raise BrowserAuthError(
-                    "Windows không giải mã được phiên của trình duyệt này. "
-                    "Hãy thử Microsoft Edge hoặc cập nhật yt-dlp.",
+                    "Không giải mã được phiên Firefox. Hãy cập nhật yt-dlp hoặc tạo hồ sơ Firefox mới.",
                     code="decrypt_failed",
                 )
             raise BrowserAuthError(
@@ -232,7 +237,10 @@ class BrowserAuthManager:
         """Close the selected browser only after explicit confirmation in the UI."""
         if os.name != "nt":
             return
-        process_name = "msedge.exe" if browser == "edge" else "chrome.exe"
+        process_name = {
+            "edge": "msedge.exe",
+            "firefox": "firefox.exe",
+        }.get(browser, "chrome.exe")
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             subprocess.run(
@@ -253,7 +261,14 @@ class BrowserAuthManager:
         local = os.environ.get("LOCALAPPDATA", "")
         program_files = os.environ.get("PROGRAMFILES", "")
         program_files_x86 = os.environ.get("PROGRAMFILES(X86)", "")
-        if browser == "edge":
+        if browser == "firefox":
+            candidates.extend(
+                Path(base) / "Mozilla Firefox" / "firefox.exe"
+                for base in (program_files, program_files_x86, local)
+                if base
+            )
+            command_name = "firefox"
+        elif browser == "edge":
             candidates.extend(
                 Path(base) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
                 for base in (program_files, program_files_x86, local)
@@ -270,7 +285,19 @@ class BrowserAuthManager:
         executable = next((path for path in candidates if path.is_file()), None)
         executable = executable or (Path(found) if (found := shutil.which(command_name)) else None)
         if executable:
-            subprocess.Popen([str(executable), "--disable-background-mode", spec.login_url])
+            arguments = (
+                [str(executable), "-new-window", spec.login_url]
+                if browser == "firefox"
+                else [str(executable), "--disable-background-mode", spec.login_url]
+            )
+            subprocess.Popen(arguments)
+        elif browser == "firefox":
+            webbrowser.open("https://www.mozilla.org/firefox/new/")
+            raise BrowserAuthError(
+                "Chưa tìm thấy Mozilla Firefox. Trang tải Firefox chính thức đã được mở; "
+                "hãy cài xong rồi bấm Đăng nhập lại.",
+                code="browser_missing",
+            )
         else:
             webbrowser.open(spec.login_url)
 

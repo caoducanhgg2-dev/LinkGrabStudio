@@ -81,6 +81,39 @@ def test_refresh_imports_browser_sessions_once(monkeypatch, tmp_path: Path) -> N
     assert engine.commands[0][engine.commands[0].index("--cookies-from-browser") + 1] == "chrome"
 
 
+def test_refresh_supports_firefox_without_manual_cookie_file(monkeypatch, tmp_path: Path) -> None:
+    expires = int(time.time()) + 3600
+    engine = FakeEngine(cookie_line("instagram.com", "sessionid", "active", expires))
+    manager = BrowserAuthManager(engine)
+    monkeypatch.setattr(auth, "app_data_dir", lambda: tmp_path)
+
+    statuses = manager.refresh("firefox")
+
+    assert statuses["Instagram"].code == "logged_in"
+    command = engine.commands[0]
+    assert command[command.index("--cookies-from-browser") + 1] == "firefox"
+
+
+def test_refresh_rejects_unknown_browser(monkeypatch, tmp_path: Path) -> None:
+    manager = BrowserAuthManager(FakeEngine(""))
+    monkeypatch.setattr(auth, "app_data_dir", lambda: tmp_path)
+
+    with pytest.raises(BrowserAuthError) as captured:
+        manager.refresh("opera")
+
+    assert captured.value.code == "invalid_browser"
+
+
+def test_open_login_uses_firefox_window(monkeypatch) -> None:
+    commands: list[list[str]] = []
+    monkeypatch.setattr(auth.shutil, "which", lambda name: "/apps/firefox" if name == "firefox" else None)
+    monkeypatch.setattr(auth.subprocess, "Popen", lambda command: commands.append(command))
+
+    BrowserAuthManager.open_login("Douyin", "firefox")
+
+    assert commands == [["/apps/firefox", "-new-window", "https://www.douyin.com/"]]
+
+
 def test_refresh_rejects_browser_without_login(monkeypatch, tmp_path: Path) -> None:
     engine = FakeEngine(cookie_line("douyin.com", "ttwid", "anonymous", int(time.time()) + 3600))
     manager = BrowserAuthManager(engine)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.1
+
+- Thêm Mozilla Firefox làm phương thức đăng nhập khuyên dùng trên Windows 11.
+- Khắc phục trường hợp cả Chrome và Edge bị Windows chặn giải mã phiên đăng nhập.
+- Tự chuyển lựa chọn sang Firefox khi phát hiện lỗi DPAPI/App-Bound Encryption.
+- Mở trang tải Firefox chính thức nếu máy chưa cài, không yêu cầu nhập cookies.txt thủ công.
+- Giữ nguyên lịch sử, cài đặt, dữ liệu chống trùng, checksum, backup và rollback.
+
 ## 1.5.0
 
 - Thay ô nhập cookies.txt bằng khu vực đăng nhập nền tảng dạng thẻ rõ ràng.
