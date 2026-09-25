@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0
+
+- Thêm cầu nối tìm kiếm Douyin trực tiếp qua Firefox đã đăng nhập.
+- Khi Douyin chặn yêu cầu HTTP, app tự mở trang tìm kiếm thật để JavaScript Douyin tạo chữ ký hợp lệ.
+- Đọc phản hồi tìm kiếm đã ký qua kết nối WebDriver BiDi cục bộ; không gửi mật khẩu hoặc cookies ra dịch vụ trung gian.
+- Dùng hồ sơ Firefox tạm riêng và nạp phiên đã lưu, không khóa Firefox chính của người dùng.
+- Tự cuộn trang để nạp thêm kết quả và lấy metadata/video từ phản hồi chính thức.
+- Giữ phương án HTTP nhanh cho YouTube và các trường hợp Douyin không bật xác minh.
+- Giữ nguyên lịch sử, đăng nhập, chống trùng, checksum, backup và rollback.
+
 ## 1.5.3
 
 - Sửa bước đọc metadata Douyin vẫn báo cần đăng nhập sau khi tìm thấy link.

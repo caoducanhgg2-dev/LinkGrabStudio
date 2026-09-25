@@ -15,6 +15,7 @@ if (-not (Test-Path "tools\yt-dlp.exe")) {
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
 python -m pytest
+python .\build\check_douyin_bridge.py
 
 Remove-Item -Recurse -Force "dist\LinkGrabStudio" -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force "build\pyinstaller" -ErrorAction SilentlyContinue

@@ -4,8 +4,11 @@ import json
 import html
 import os
 import re
+import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.parse
@@ -288,6 +291,13 @@ class DownloaderEngine:
     ) -> tuple[list[VideoInfo], list[str]]:
         """Return rich search items and direct Douyin page URLs from one request."""
         bodies = self._fetch_douyin_search_bodies(query, limit, cookies_file=cookies_file)
+        if not bodies or not any(self._extract_douyin_video_urls(body) for body in bodies):
+            # Douyin signs search requests in its own JavaScript. If the plain
+            # authenticated request is challenged, let the user's logged-in
+            # Firefox create that signature and read the signed JSON locally.
+            bodies.extend(
+                self._fetch_douyin_search_with_firefox(query, cookies_file=cookies_file)
+            )
         videos: list[VideoInfo] = []
         urls: list[str] = []
         seen_videos: set[str] = set()
@@ -385,6 +395,233 @@ class DownloaderEngine:
                 continue
             bodies.append(body)
         return bodies
+
+    def _fetch_douyin_search_with_firefox(
+        self,
+        query: str,
+        *,
+        cookies_file: Path | None = None,
+    ) -> list[str]:
+        """Use Firefox WebDriver BiDi to capture Douyin's own signed search JSON."""
+        if os.name != "nt":
+            return []
+        deno_path = Path(str(self.deno))
+        if not deno_path.is_file():
+            return []
+        firefox = self._find_firefox_executable()
+        if not firefox:
+            return []
+        port = self._free_local_port()
+        bridge_profile = Path(tempfile.mkdtemp(prefix="LinkGrabStudio_Douyin_"))
+        search_url = (
+            "https://www.douyin.com/search/"
+            + urllib.parse.quote(query, safe="")
+            + "?type=video"
+        )
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        browser_process = None
+        try:
+            browser_process = subprocess.Popen(
+                [
+                    str(firefox),
+                    "-no-remote",
+                    "-profile",
+                    str(bridge_profile),
+                    "--remote-debugging-port",
+                    str(port),
+                    "-new-window",
+                    "about:blank",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+        except OSError:
+            shutil.rmtree(bridge_profile, ignore_errors=True)
+            return []
+
+        cookie_path = str(cookies_file) if cookies_file and cookies_file.is_file() else ""
+        script = self._douyin_bidi_script(port, search_url, cookie_path)
+        command = [
+            str(deno_path),
+            "eval",
+            f"--allow-net=127.0.0.1:{port}",
+            *( [f"--allow-read={cookie_path}"] if cookie_path else [] ),
+            script,
+        ]
+        try:
+            result = self._run_capture(command, timeout=180)
+        except (OSError, subprocess.SubprocessError):
+            return []
+        finally:
+            if browser_process and browser_process.poll() is None:
+                try:
+                    browser_process.terminate()
+                    browser_process.wait(timeout=10)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            shutil.rmtree(bridge_profile, ignore_errors=True)
+        marker = "__LINKGRAB_DOUYIN_JSON__"
+        payload_line = next(
+            (line[len(marker) :] for line in result.stdout.splitlines() if line.startswith(marker)),
+            "",
+        )
+        if not payload_line:
+            return []
+        try:
+            bodies = json.loads(payload_line)
+        except json.JSONDecodeError:
+            return []
+        return [str(body) for body in bodies if isinstance(body, str) and body.strip()]
+
+    @staticmethod
+    def _find_firefox_executable() -> Path | None:
+        candidates: list[Path] = []
+        for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+            base = os.environ.get(variable, "")
+            if base:
+                candidates.append(Path(base) / "Mozilla Firefox" / "firefox.exe")
+        executable = next((path for path in candidates if path.is_file()), None)
+        if executable:
+            return executable
+        found = shutil.which("firefox")
+        return Path(found) if found else None
+
+    @staticmethod
+    def _free_local_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            return int(listener.getsockname()[1])
+
+    @staticmethod
+    def _douyin_bidi_script(port: int, search_url: str, cookie_path: str = "") -> str:
+        """Return a dependency-free Deno WebDriver BiDi client."""
+        return f'''
+const endpoint = "ws://127.0.0.1:{port}/session";
+const targetUrl = {json.dumps(search_url)};
+const cookiePath = {json.dumps(cookie_path)};
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let ws;
+for (let attempt = 0; attempt < 60; attempt++) {{
+  try {{
+    ws = new WebSocket(endpoint);
+    await new Promise((resolve, reject) => {{
+      const timer = setTimeout(() => reject(new Error("open timeout")), 1000);
+      ws.onopen = () => {{ clearTimeout(timer); resolve(); }};
+      ws.onerror = () => {{ clearTimeout(timer); reject(new Error("open failed")); }};
+    }});
+    break;
+  }} catch (_) {{
+    try {{ ws?.close(); }} catch (_) {{}}
+    ws = undefined;
+    await delay(500);
+  }}
+}}
+if (!ws) Deno.exit(2);
+let nextId = 0;
+const waiting = new Map();
+ws.onmessage = (event) => {{
+  const message = JSON.parse(event.data);
+  if (!message.id || !waiting.has(message.id)) return;
+  const pending = waiting.get(message.id);
+  waiting.delete(message.id);
+  if (message.type === "error") pending.reject(new Error(message.message || message.error));
+  else pending.resolve(message.result);
+}};
+const send = (method, params = {{}}, timeoutMs = 30000) => new Promise((resolve, reject) => {{
+  const id = ++nextId;
+  waiting.set(id, {{resolve, reject}});
+  ws.send(JSON.stringify({{id, method, params}}));
+  setTimeout(() => {{
+    if (!waiting.has(id)) return;
+    waiting.delete(id);
+    reject(new Error(method + " timeout"));
+  }}, timeoutMs);
+}});
+try {{
+  await send("session.new", {{capabilities: {{alwaysMatch: {{acceptInsecureCerts: false}}}}}});
+  if (cookiePath) {{
+    try {{
+      const cookieText = await Deno.readTextFile(cookiePath);
+      for (const rawLine of cookieText.split(/\\r?\\n/)) {{
+        let line = rawLine.trim();
+        let httpOnly = false;
+        if (line.startsWith("#HttpOnly_")) {{
+          httpOnly = true;
+          line = line.slice("#HttpOnly_".length);
+        }} else if (!line || line.startsWith("#")) {{
+          continue;
+        }}
+        const fields = line.split("\\t");
+        if (fields.length < 7) continue;
+        const [domain, , path, secureText, expiryText, name, value] = fields;
+        if (!domain.toLowerCase().includes("douyin.com") || !name || !value) continue;
+        const cookie = {{
+          name,
+          value: {{type: "string", value}},
+          domain,
+          path: path || "/",
+          secure: secureText.toUpperCase() === "TRUE",
+          httpOnly,
+        }};
+        const expiry = Number(expiryText || 0);
+        if (Number.isFinite(expiry) && expiry > 0) cookie.expiry = Math.floor(expiry);
+        try {{ await send("storage.setCookie", {{cookie}}); }} catch (_) {{}}
+      }}
+    }} catch (_) {{}}
+  }}
+  const tree = await send("browsingContext.getTree", {{maxDepth: 0}});
+  const contexts = tree.contexts || [];
+  if (!contexts.length) throw new Error("no browsing context");
+  const context = (contexts.find((item) => String(item.url).includes("douyin.com")) || contexts[0]).context;
+  await send("browsingContext.navigate", {{context, url: targetUrl, wait: "complete"}}, 60000);
+  const expression = `(async () => {{
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const searchResources = () => performance.getEntriesByType("resource")
+      .map((entry) => entry.name)
+      .filter((url) => url.includes("/aweme/v1/web/") && url.includes("search"));
+    for (let waitRound = 0; waitRound < 40 && !searchResources().length; waitRound++) {{
+      await sleep(750);
+    }}
+    for (let round = 0; round < 12; round++) {{
+      window.scrollBy(0, Math.max(window.innerHeight, 800));
+      await sleep(600);
+    }}
+    await sleep(1800);
+    const resources = searchResources();
+    const unique = [...new Set(resources)];
+    const bodies = [];
+    for (const url of unique) {{
+      try {{
+        const response = await fetch(url, {{credentials: "include"}});
+        const text = await response.text();
+        if (text && text.trim().startsWith("{{")) bodies.push(text);
+      }} catch (_) {{}}
+    }}
+    if (!bodies.length) {{
+      const state = [...document.scripts]
+        .map((node) => node.textContent || "")
+        .filter((text) => text.includes("aweme_id") && text.length > 100);
+      bodies.push(...state);
+    }}
+    return JSON.stringify(bodies);
+  }})()`;
+  const evaluated = await send("script.evaluate", {{
+    expression,
+    target: {{context}},
+    awaitPromise: true,
+    resultOwnership: "none",
+  }}, 70000);
+  const value = evaluated?.result?.value || "[]";
+  console.log("__LINKGRAB_DOUYIN_JSON__" + value);
+  try {{ await send("browser.close", {{}}); }} catch (_) {{}}
+  ws.close();
+}} catch (error) {{
+  console.error(String(error));
+  try {{ ws.close(); }} catch (_) {{}}
+  Deno.exit(3);
+}}
+'''
 
     @classmethod
     def _extract_douyin_search_videos(cls, body: str) -> list[VideoInfo]:

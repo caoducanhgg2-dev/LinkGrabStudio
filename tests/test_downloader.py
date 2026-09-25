@@ -416,6 +416,48 @@ def test_douyin_search_json_provides_metadata_and_direct_media() -> None:
     assert videos[0].raw["direct_url"] == "https://video.example.test/douyin-play"
 
 
+def test_douyin_search_uses_firefox_bridge_after_http_challenge(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    payload = {
+        "data": [
+            {
+                "aweme_info": {
+                    "aweme_id": "7390012345678901234",
+                    "desc": "Bushcraft",
+                    "video": {
+                        "duration": 60000,
+                        "play_addr": {
+                            "url_list": ["https://video.example.test/signed-play"]
+                        },
+                    },
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(engine, "_fetch_douyin_search_bodies", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        engine,
+        "_fetch_douyin_search_with_firefox",
+        lambda query, cookies_file=None: [json.dumps(payload)],
+    )
+    videos, urls = engine._search_douyin_authenticated("丛林生存", 20)
+    assert [video.video_id for video in videos] == ["7390012345678901234"]
+    assert videos[0].raw["direct_url"] == "https://video.example.test/signed-play"
+    assert urls == ["https://www.douyin.com/video/7390012345678901234"]
+
+
+def test_douyin_bidi_script_reads_signed_search_responses() -> None:
+    script = DownloaderEngine._douyin_bidi_script(
+        9222, "https://www.douyin.com/search/test?type=video"
+    )
+    assert "ws://127.0.0.1:9222/session" in script
+    assert "session.new" in script
+    assert "browsingContext.navigate" in script
+    assert "performance.getEntriesByType" in script
+    assert "storage.setCookie" in script
+    assert "__LINKGRAB_DOUYIN_JSON__" in script
+
+
 def test_douyin_direct_media_download_keeps_title_and_source(monkeypatch, tmp_path: Path) -> None:
     engine = DownloaderEngine()
     video = VideoInfo(
