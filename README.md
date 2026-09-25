@@ -1,4 +1,4 @@
-# LinkGrab Studio 1.4
+# LinkGrab Studio 1.5
 
 Ứng dụng Windows giao diện tiếng Việt để xem trước và tải video từ YouTube,
 TikTok, Douyin, Facebook và Instagram bằng cách dán một hoặc nhiều đường link.
@@ -21,8 +21,8 @@ TikTok, Douyin, Facebook và Instagram bằng cách dán một hoặc nhiều đ
 - Tiến trình, tốc độ, ETA và nhật ký hoạt động.
 - Chống tải trùng bằng SQLite; video trùng được bỏ chọn, nhưng có thể chọn “Tải lại” để ghi lại file khi cần.
 - Lịch sử tải lưu link nguồn và mở nhanh thư mục kết quả.
-- Hỗ trợ cookies.txt cho nội dung Douyin/Facebook/Instagram mà tài khoản được phép xem.
-- Lưu cookies riêng theo nền tảng và tự chọn đúng file khi xử lý danh sách link hỗn hợp.
+- Đăng nhập YouTube/TikTok/Douyin/Facebook/Instagram qua Chrome hoặc Edge, không cần tự xuất cookies.txt.
+- Hiển thị trạng thái đăng nhập riêng cho từng nền tảng và tự chọn đúng phiên khi tải.
 - Dừng an toàn, thử tiếp tục file dở bằng khả năng resume của yt-dlp.
 
 ## Chạy mã nguồn để phát triển

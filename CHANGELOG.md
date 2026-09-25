@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0
+
+- Thay ô nhập cookies.txt bằng khu vực đăng nhập nền tảng dạng thẻ rõ ràng.
+- Mở trực tiếp trang đăng nhập chính thức của YouTube, TikTok, Douyin, Facebook và Instagram.
+- Tự đọc phiên đăng nhập từ Google Chrome hoặc Microsoft Edge; app không nhận hay lưu mật khẩu.
+- Hiển thị riêng trạng thái Đã đăng nhập, Chưa đăng nhập, Cookies hết hạn hoặc Không đọc được phiên.
+- Thêm nút Kiểm tra lại để cập nhật đồng thời trạng thái của năm nền tảng.
+- Thêm nút Xóa phiên khỏi app mà không đăng xuất tài khoản trong trình duyệt.
+- Giữ tương thích dữ liệu cookies cũ, lịch sử, chống trùng, backup và rollback.
+
 ## 1.4.1
 
 - Thay icon LinkGrab mới trên file EXE, thanh tiêu đề và shortcut Windows.

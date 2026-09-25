@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 APP_NAME = "LinkGrab Studio"
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.5.0"
 APP_DIR_NAME = "LinkGrabStudio"
 
 
@@ -31,9 +31,12 @@ class AppSettings:
     quality: str = "1080p"
     media_format: str = "MP4"
     cookies_file: str = ""
+    youtube_cookies_file: str = ""
+    tiktok_cookies_file: str = ""
     douyin_cookies_file: str = ""
     facebook_cookies_file: str = ""
     instagram_cookies_file: str = ""
+    login_browser: str = "chrome"
     douyin_browser: str = "chrome"
     auto_clipboard: bool = True
     skip_duplicates: bool = True
@@ -45,6 +48,8 @@ class AppSettings:
             return cls(output_dir=str(default_download_dir()))
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            if "login_browser" not in data and "douyin_browser" in data:
+                data["login_browser"] = data["douyin_browser"]
             allowed = cls.__dataclass_fields__.keys()
             settings = cls(**{k: data[k] for k in allowed if k in data})
             if not settings.output_dir:
@@ -62,9 +67,23 @@ class AppSettings:
 
     def cookies_for_platform(self, platform: str) -> Path | None:
         specific = {
+            "youtube": self.youtube_cookies_file,
+            "tiktok": self.tiktok_cookies_file,
             "douyin": self.douyin_cookies_file,
             "facebook": self.facebook_cookies_file,
             "instagram": self.instagram_cookies_file,
         }.get(platform.strip().lower(), "")
         selected = specific or self.cookies_file
         return Path(selected) if selected else None
+
+    def use_browser_login(self, cookie_file: Path, browser: str) -> None:
+        """Route every platform through the managed browser-login session."""
+        value = str(cookie_file)
+        self.cookies_file = value
+        self.youtube_cookies_file = value
+        self.tiktok_cookies_file = value
+        self.douyin_cookies_file = value
+        self.facebook_cookies_file = value
+        self.instagram_cookies_file = value
+        self.login_browser = browser
+        self.douyin_browser = browser

@@ -11,47 +11,101 @@ from pathlib import Path
 from .config import app_data_dir
 
 
-class DouyinAuthError(RuntimeError):
+class BrowserAuthError(RuntimeError):
     def __init__(self, message: str, *, code: str = "unknown") -> None:
         super().__init__(message)
         self.code = code
 
 
 @dataclass(frozen=True, slots=True)
-class DouyinAuthStatus:
+class PlatformAuthSpec:
+    name: str
+    login_url: str
+    domains: tuple[str, ...]
+    auth_cookie_names: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserAuthStatus:
+    platform: str
     code: str
     message: str
     cookie_file: Path | None = None
 
 
-class DouyinAuthManager:
-    """Import and validate Douyin login cookies without asking for a password."""
+PLATFORM_AUTH_SPECS = {
+    "YouTube": PlatformAuthSpec(
+        "YouTube",
+        "https://accounts.google.com/ServiceLogin?service=youtube",
+        ("youtube.com", "google.com"),
+        frozenset(
+            {
+                "sid",
+                "hsid",
+                "ssid",
+                "sapisid",
+                "__secure-1papisid",
+                "__secure-3papisid",
+                "login_info",
+            }
+        ),
+    ),
+    "TikTok": PlatformAuthSpec(
+        "TikTok",
+        "https://www.tiktok.com/login",
+        ("tiktok.com",),
+        frozenset({"sessionid", "sessionid_ss", "sid_guard"}),
+    ),
+    "Douyin": PlatformAuthSpec(
+        "Douyin",
+        "https://www.douyin.com/",
+        ("douyin.com",),
+        frozenset({"sessionid", "sessionid_ss", "sid_guard", "sid_tt"}),
+    ),
+    "Facebook": PlatformAuthSpec(
+        "Facebook",
+        "https://www.facebook.com/login/",
+        ("facebook.com",),
+        frozenset({"c_user", "xs"}),
+    ),
+    "Instagram": PlatformAuthSpec(
+        "Instagram",
+        "https://www.instagram.com/accounts/login/",
+        ("instagram.com",),
+        frozenset({"sessionid", "ds_user_id"}),
+    ),
+}
 
-    AUTH_COOKIE_NAMES = {
-        "sessionid",
-        "sessionid_ss",
-        "sid_guard",
-        "sid_tt",
-    }
+PLATFORM_AUTH_ORDER = ("Douyin", "TikTok", "YouTube", "Facebook", "Instagram")
+
+
+class BrowserAuthManager:
+    """Read login sessions from Chrome/Edge without receiving user passwords."""
 
     def __init__(self, engine) -> None:
         self.engine = engine
 
     @property
     def cookie_file(self) -> Path:
-        return app_data_dir() / "douyin_browser_cookies.txt"
+        return app_data_dir() / "browser_login_cookies.txt"
 
-    def status(self, cookie_file: Path | None = None) -> DouyinAuthStatus:
+    @staticmethod
+    def _domain_matches(domain: str, spec: PlatformAuthSpec) -> bool:
+        normalized = domain.lower().lstrip(".")
+        return any(normalized == suffix or normalized.endswith(f".{suffix}") for suffix in spec.domains)
+
+    def status(self, platform: str, cookie_file: Path | None = None) -> BrowserAuthStatus:
+        spec = PLATFORM_AUTH_SPECS[platform]
         path = cookie_file or self.cookie_file
         if not path.is_file():
-            return DouyinAuthStatus("missing", "Chưa lấy đăng nhập Douyin từ trình duyệt.")
+            return BrowserAuthStatus(platform, "missing", "Chưa đăng nhập trong app.")
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError as exc:
-            return DouyinAuthStatus("error", f"Không đọc được cookies: {exc}", path)
+            return BrowserAuthStatus(platform, "error", f"Không đọc được phiên: {exc}", path)
 
         now = int(time.time())
-        found_douyin = False
+        found_platform = False
         found_expired_auth = False
         for raw_line in lines:
             line = raw_line.strip()
@@ -60,11 +114,11 @@ class DouyinAuthManager:
             elif not line or line.startswith("#"):
                 continue
             fields = line.split("\t")
-            if len(fields) < 7 or "douyin.com" not in fields[0].lower():
+            if len(fields) < 7 or not self._domain_matches(fields[0], spec):
                 continue
-            found_douyin = True
+            found_platform = True
             name = fields[5].strip().lower()
-            if name not in self.AUTH_COOKIE_NAMES:
+            if name not in spec.auth_cookie_names:
                 continue
             try:
                 expires = int(fields[4] or "0")
@@ -74,34 +128,21 @@ class DouyinAuthManager:
                 found_expired_auth = True
                 continue
             if fields[6]:
-                return DouyinAuthStatus(
-                    "logged_in",
-                    "Đã đăng nhập Douyin — cookies đang hoạt động.",
-                    path,
-                )
+                return BrowserAuthStatus(platform, "logged_in", f"Đã đăng nhập {platform}", path)
 
         if found_expired_auth:
-            return DouyinAuthStatus(
-                "expired",
-                "Cookies hết hạn — hãy đăng nhập lại rồi bấm Làm mới cookies.",
-                path,
-            )
-        if found_douyin:
-            return DouyinAuthStatus(
-                "not_logged_in",
-                "Có cookies Douyin nhưng chưa thấy phiên đăng nhập.",
-                path,
-            )
-        return DouyinAuthStatus(
-            "not_logged_in",
-            "Trình duyệt chưa có phiên đăng nhập Douyin.",
-            path,
-        )
+            return BrowserAuthStatus(platform, "expired", "Cookies hết hạn", path)
+        if found_platform:
+            return BrowserAuthStatus(platform, "not_logged_in", "Chưa có phiên đăng nhập", path)
+        return BrowserAuthStatus(platform, "missing", "Chưa đăng nhập trong app.", path)
 
-    def refresh(self, browser: str) -> DouyinAuthStatus:
+    def statuses(self, cookie_file: Path | None = None) -> dict[str, BrowserAuthStatus]:
+        return {platform: self.status(platform, cookie_file) for platform in PLATFORM_AUTH_ORDER}
+
+    def refresh(self, browser: str) -> dict[str, BrowserAuthStatus]:
         browser = browser.lower().strip()
         if browser not in {"chrome", "edge"}:
-            raise DouyinAuthError(
+            raise BrowserAuthError(
                 "Chỉ hỗ trợ Google Chrome hoặc Microsoft Edge.",
                 code="invalid_browser",
             )
@@ -112,16 +153,8 @@ class DouyinAuthManager:
         try:
             temp.unlink(missing_ok=True)
         except OSError as exc:
-            raise DouyinAuthError(
-                f"Không thể chuẩn bị tệp cookies tạm: {exc}",
-                code="cookie_write",
-            ) from exc
+            raise BrowserAuthError(f"Không thể chuẩn bị tệp phiên tạm: {exc}", code="cookie_write") from exc
 
-        try:
-            urls = self.engine._discover_douyin_urls("热门", 1)
-        except Exception:
-            urls = []
-        check_url = urls[0] if urls else "https://www.douyin.com/"
         command = [
             str(self.engine.ytdlp),
             "--ignore-config",
@@ -131,52 +164,68 @@ class DouyinAuthManager:
             str(temp),
             "--skip-download",
             "--no-warnings",
-            check_url,
+            "https://www.youtube.com/",
         ]
         try:
-            result = self.engine._run_capture(command, timeout=120)
+            result = self.engine._run_capture(command, timeout=180)
         except FileNotFoundError as exc:
-            raise DouyinAuthError(
-                "Không tìm thấy yt-dlp trong gói ứng dụng.",
-                code="engine_missing",
-            ) from exc
+            raise BrowserAuthError("Không tìm thấy yt-dlp trong gói ứng dụng.", code="engine_missing") from exc
         except subprocess.TimeoutExpired as exc:
-            raise DouyinAuthError(
-                "Quá thời gian đọc đăng nhập từ trình duyệt.",
-                code="timeout",
-            ) from exc
+            raise BrowserAuthError("Quá thời gian đọc đăng nhập từ trình duyệt.", code="timeout") from exc
 
-        imported = self.status(temp)
-        if imported.code == "logged_in":
-            try:
-                temp.replace(target)
-            except OSError as exc:
-                raise DouyinAuthError(
-                    f"Không thể lưu phiên đăng nhập Douyin: {exc}",
-                    code="cookie_write",
-                ) from exc
-            return self.status(target)
-
-        temp.unlink(missing_ok=True)
         detail = (result.stderr or result.stdout or "").strip()
         lowered = detail.lower()
-        if "could not copy chrome cookie database" in lowered or "database is locked" in lowered:
-            raise DouyinAuthError(
-                "Trình duyệt vẫn chạy nền và đang khóa cookies.",
-                code="browser_locked",
+        if not temp.is_file():
+            if "could not copy" in lowered or "database is locked" in lowered:
+                raise BrowserAuthError(
+                    "Trình duyệt vẫn chạy nền và đang khóa dữ liệu đăng nhập.",
+                    code="browser_locked",
+                )
+            if "decrypt" in lowered or "dpapi" in lowered:
+                raise BrowserAuthError(
+                    "Windows không giải mã được phiên của trình duyệt này. "
+                    "Hãy thử Microsoft Edge hoặc cập nhật yt-dlp.",
+                    code="decrypt_failed",
+                )
+            raise BrowserAuthError(
+                "Không đọc được phiên đăng nhập. Hãy đăng nhập trên trình duyệt rồi thử lại.",
+                code="not_logged_in",
             )
-        if "decrypt" in lowered or "dpapi" in lowered:
-            raise DouyinAuthError(
-                "Windows không giải mã được cookies của trình duyệt này. "
-                "Hãy thử Microsoft Edge hoặc cập nhật yt-dlp.",
-                code="decrypt_failed",
+
+        imported = self.statuses(temp)
+        if not any(status.code == "logged_in" for status in imported.values()):
+            temp.unlink(missing_ok=True)
+            raise BrowserAuthError(
+                "Không tìm thấy tài khoản đã đăng nhập trên trình duyệt đã chọn.",
+                code="not_logged_in",
             )
-        if imported.code == "expired":
-            raise DouyinAuthError(imported.message, code="expired")
-        raise DouyinAuthError(
-            "Hãy đăng nhập Douyin trong trình duyệt đã chọn rồi thử lại.",
-            code="not_logged_in",
-        )
+        try:
+            temp.replace(target)
+        except OSError as exc:
+            raise BrowserAuthError(f"Không thể lưu phiên đăng nhập: {exc}", code="cookie_write") from exc
+        return self.statuses(target)
+
+    def clear_platform(self, platform: str) -> BrowserAuthStatus:
+        spec = PLATFORM_AUTH_SPECS[platform]
+        target = self.cookie_file
+        if not target.is_file():
+            return self.status(platform, target)
+        try:
+            kept: list[str] = []
+            for raw_line in target.read_text(encoding="utf-8", errors="replace").splitlines():
+                parse_line = raw_line
+                if parse_line.startswith("#HttpOnly_"):
+                    parse_line = parse_line[len("#HttpOnly_") :]
+                fields = parse_line.split("\t")
+                if len(fields) >= 7 and self._domain_matches(fields[0], spec):
+                    continue
+                kept.append(raw_line)
+            temp = target.with_suffix(".clear.tmp")
+            temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+            temp.replace(target)
+        except OSError as exc:
+            raise BrowserAuthError(f"Không thể xóa phiên {platform}: {exc}", code="cookie_write") from exc
+        return self.status(platform, target)
 
     @staticmethod
     def close_browser(browser: str) -> None:
@@ -195,14 +244,11 @@ class DouyinAuthManager:
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            raise DouyinAuthError(
-                f"Không thể đóng {process_name}: {exc}",
-                code="close_failed",
-            ) from exc
+            raise BrowserAuthError(f"Không thể đóng {process_name}: {exc}", code="close_failed") from exc
 
     @staticmethod
-    def open_login(browser: str) -> None:
-        url = "https://www.douyin.com/"
+    def open_login(platform: str, browser: str) -> None:
+        spec = PLATFORM_AUTH_SPECS[platform]
         candidates: list[Path] = []
         local = os.environ.get("LOCALAPPDATA", "")
         program_files = os.environ.get("PROGRAMFILES", "")
@@ -224,6 +270,11 @@ class DouyinAuthManager:
         executable = next((path for path in candidates if path.is_file()), None)
         executable = executable or (Path(found) if (found := shutil.which(command_name)) else None)
         if executable:
-            subprocess.Popen([str(executable), "--disable-background-mode", url])
+            subprocess.Popen([str(executable), "--disable-background-mode", spec.login_url])
         else:
-            webbrowser.open(url)
+            webbrowser.open(spec.login_url)
+
+
+# Compatibility aliases for older integrations that imported the Douyin names.
+DouyinAuthError = BrowserAuthError
+DouyinAuthStatus = BrowserAuthStatus

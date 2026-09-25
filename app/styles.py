@@ -58,6 +58,30 @@ QFrame#card, QGroupBox {
     border: 1px solid #2f3042;
     border-radius: 12px;
 }
+QFrame#authCard {
+    background: #1d1e2c;
+    border: 1px solid #393a4d;
+    border-radius: 12px;
+}
+QFrame#authCard[authState="logged_in"] {
+    background: #142b23;
+    border: 1px solid #1ca968;
+}
+QFrame#authCard[authState="expired"] {
+    background: #302616;
+    border: 1px solid #d48a12;
+}
+QFrame#authCard[authState="not_logged_in"], QFrame#authCard[authState="error"] {
+    background: #301b22;
+    border: 1px solid #b94152;
+}
+QFrame#authCard QLabel#authName { font-weight: 800; font-size: 11pt; }
+QFrame#authCard QLabel#authStatus { color: #a9aabc; }
+QFrame#authCard[authState="logged_in"] QLabel#authStatus { color: #3ee58d; }
+QFrame#authCard[authState="expired"] QLabel#authStatus { color: #ffc44d; }
+QFrame#authCard[authState="not_logged_in"] QLabel#authStatus,
+QFrame#authCard[authState="error"] QLabel#authStatus { color: #ff7b8d; }
+QPushButton#authAction { padding: 7px 10px; text-align: center; }
 QFrame#linkBar {
     background: #171825;
     border: 1px solid #34354a;
@@ -114,4 +138,5 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QLabel#muted { color: #9b9caf; }
 QLabel#sectionTitle { font-size: 14pt; font-weight: 800; }
 QLabel#countBadge { color: #cbb9ff; font-weight: 700; }
+QLabel#successNote { color: #31d97f; }
 """

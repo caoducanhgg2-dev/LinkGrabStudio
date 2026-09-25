@@ -6,35 +6,35 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
 from .database import HistoryDatabase
-from .auth import DouyinAuthError
+from .auth import BrowserAuthError
 from .downloader import DownloaderEngine, DownloaderError
 from .models import DownloadJob, DownloadOptions, DownloadStatus, PreviewOptions, VideoInfo
 from .updater import EngineUpdater
 from .utils import detect_platform
 
 
-class DouyinAuthSignals(QObject):
+class BrowserAuthSignals(QObject):
     finished = Signal(object)
     error = Signal(object)
 
 
-class DouyinAuthWorker(QRunnable):
+class BrowserAuthWorker(QRunnable):
     def __init__(self, manager, browser: str) -> None:
         super().__init__()
         self.manager = manager
         self.browser = browser
-        self.signals = DouyinAuthSignals()
+        self.signals = BrowserAuthSignals()
 
     @Slot()
     def run(self) -> None:
         try:
             self.signals.finished.emit(self.manager.refresh(self.browser))
-        except DouyinAuthError as exc:
+        except BrowserAuthError as exc:
             self.signals.error.emit(exc)
         except Exception as exc:
             self.signals.error.emit(
-                DouyinAuthError(
-                    f"Không thể đọc đăng nhập Douyin: {exc}",
+                BrowserAuthError(
+                    f"Không thể đọc đăng nhập trình duyệt: {exc}",
                     code="unexpected",
                 )
             )
