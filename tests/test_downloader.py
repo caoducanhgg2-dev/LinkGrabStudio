@@ -237,6 +237,11 @@ def test_douyin_keyword_search_uses_indexed_direct_video_urls(monkeypatch) -> No
     monkeypatch.setattr(engine, "translate_keyword", lambda query, language: "吃播")
     monkeypatch.setattr(
         engine,
+        "_search_douyin_urls_authenticated",
+        lambda query, limit, cookies_file=None: [],
+    )
+    monkeypatch.setattr(
+        engine,
         "_discover_douyin_urls",
         lambda query, limit: ["https://www.douyin.com/video/729001"],
     )
@@ -272,6 +277,98 @@ def test_douyin_keyword_search_uses_indexed_direct_video_urls(monkeypatch) -> No
     assert videos[0].unique_key == "douyin:729001"
     assert videos[0].raw["search_query_original"] == "mukbang"
     assert videos[0].raw["search_query_translated"] == "吃播"
+
+
+def test_douyin_authenticated_search_reads_hydration_and_sends_cookies(
+    monkeypatch, tmp_path: Path
+) -> None:
+    engine = DownloaderEngine()
+    cookie_file = tmp_path / "browser_login_cookies.txt"
+    cookie_file.write_text(
+        "# Netscape HTTP Cookie File\n"
+        ".douyin.com\tTRUE\t/\tTRUE\t0\tsessionid\tsecret-session\n"
+        ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tdo-not-send\n",
+        encoding="utf-8",
+    )
+    bodies = [
+        '<script>window._SSR_DATA={"aweme_id":"7390012345678901234",'
+        '"url":"https:\\/\\/www.douyin.com\\/video\\/7390098765432101234"}</script>',
+        "{}",
+    ]
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return self.body.encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        return FakeResponse(bodies.pop(0))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    urls = engine._search_douyin_urls_authenticated(
+        "吃播", 20, cookies_file=cookie_file
+    )
+    assert urls == [
+        "https://www.douyin.com/video/7390098765432101234",
+        "https://www.douyin.com/video/7390012345678901234",
+    ]
+    assert "sessionid=secret-session" in requests[0].headers["Cookie"]
+    assert "do-not-send" not in requests[0].headers["Cookie"]
+    assert "%E5%90%83%E6%92%AD" in requests[0].full_url
+
+
+def test_douyin_keyword_search_prefers_authenticated_results(monkeypatch) -> None:
+    engine = DownloaderEngine()
+    monkeypatch.setattr(engine, "translate_keyword", lambda query, language: "吃播")
+    monkeypatch.setattr(
+        engine,
+        "_search_douyin_urls_authenticated",
+        lambda query, limit, cookies_file=None: [
+            "https://www.douyin.com/video/7390012345678901234"
+        ],
+    )
+
+    def fail_public_index(query, limit):
+        raise AssertionError("Public search fallback must not run")
+
+    monkeypatch.setattr(engine, "_discover_douyin_urls", fail_public_index)
+    monkeypatch.setattr(
+        engine,
+        "_preview_douyin_urls",
+        lambda urls, cookies_file=None: [
+            VideoInfo(
+                url=urls[0],
+                video_id="7390012345678901234",
+                title="吃播",
+                platform="Douyin",
+                webpage_url=urls[0],
+                extractor="Douyin",
+            )
+        ],
+    )
+    videos = engine.preview_search(
+        ["mukbang"],
+        PreviewOptions(
+            keyword_search=True,
+            search_platform="Douyin",
+            search_language="zh-cn",
+            search_limit=10,
+            search_scan_limit=50,
+            since_days=0,
+            sort_by="views",
+        ),
+    )
+    assert [video.video_id for video in videos] == ["7390012345678901234"]
 
 
 def test_douyin_discovery_reads_bing_rss_and_normalizes_urls(monkeypatch) -> None:

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.2
+
+- Sửa tìm kiếm từ khóa Douyin sau khi app đã nhận đăng nhập thành công.
+- Dùng trực tiếp phiên Douyin đã lưu để đọc trang tìm kiếm và API web của Douyin.
+- Chỉ dùng Bing/DuckDuckGo làm phương án dự phòng khi Douyin không trả dữ liệu.
+- Nhận diện link video trong HTML, dữ liệu hydration và JSON dù Douyin thay đổi cấu trúc trang.
+- Thông báo riêng trường hợp Douyin yêu cầu xác minh tìm kiếm, không còn báo nhầm lỗi đăng nhập.
+- Giữ nguyên lịch sử, cài đặt, dữ liệu chống trùng, checksum, backup và rollback.
+
 ## 1.5.1
 
 - Thêm Mozilla Firefox làm phương thức đăng nhập khuyên dùng trên Windows 11.

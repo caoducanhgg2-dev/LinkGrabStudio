@@ -191,11 +191,21 @@ class DownloaderEngine:
                 continue
             translated_query = self.translate_keyword(clean_query, options.search_language)
             if options.search_platform == "Douyin":
-                urls = self._discover_douyin_urls(translated_query, scan_limit)
+                urls = self._search_douyin_urls_authenticated(
+                    translated_query,
+                    scan_limit,
+                    cookies_file=cookies_file,
+                )
+                if not urls:
+                    # Public search engines are only a last resort. Their Douyin
+                    # indexes are incomplete and can be empty even when the user
+                    # has a valid authenticated Douyin session.
+                    urls = self._discover_douyin_urls(translated_query, scan_limit)
                 if not urls:
                     raise DownloaderError(
-                        "Không tìm thấy URL video Douyin trong chỉ mục tìm kiếm web. "
-                        "Hãy thử từ khóa tiếng Trung khác hoặc giảm bộ lọc thời gian."
+                        "Douyin không trả kết quả cho từ khóa này. Phiên đăng nhập có thể vẫn hợp lệ, "
+                        "nhưng Douyin đang yêu cầu xác minh tìm kiếm. Hãy mở Douyin trong trình duyệt, "
+                        "tìm thử một lần rồi bấm Làm mới đăng nhập trong Cài đặt."
                     )
                 videos = self._preview_douyin_urls(urls, cookies_file=cookies_file)
                 for video in videos:
@@ -262,6 +272,145 @@ class DownloaderEngine:
                 reverse=True,
             )
         return filtered[: max(1, options.search_limit)]
+
+    def _search_douyin_urls_authenticated(
+        self,
+        query: str,
+        limit: int,
+        *,
+        cookies_file: Path | None = None,
+    ) -> list[str]:
+        """Search Douyin itself with the browser session saved by the app.
+
+        Douyin changes its client-side response shape frequently.  The parser is
+        deliberately tolerant: it accepts direct URLs and the stable numeric
+        identifiers found in both page hydration data and JSON API responses.
+        """
+        wanted = max(1, min(300, limit))
+        encoded_query = urllib.parse.quote(query, safe="")
+        referer = f"https://www.douyin.com/search/{encoded_query}?type=video"
+        cookie_header = self._cookie_header_for_domain(cookies_file, "douyin.com")
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+            "Referer": "https://www.douyin.com/",
+        }
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+
+        sources = [referer]
+        # The same authenticated web endpoint used by Douyin's search page.  It
+        # is attempted after the HTML page because some sessions receive all
+        # results in hydration data and do not need a second request.
+        api_params = urllib.parse.urlencode(
+            {
+                "device_platform": "webapp",
+                "aid": "6383",
+                "channel": "channel_pc_web",
+                "search_channel": "aweme_general",
+                "keyword": query,
+                "search_source": "normal_search",
+                "query_correct_type": "1",
+                "is_filter_search": "0",
+                "offset": "0",
+                "count": str(min(50, wanted)),
+            }
+        )
+        sources.append(
+            "https://www.douyin.com/aweme/v1/web/general/search/single/?" + api_params
+        )
+
+        found: list[str] = []
+        seen: set[str] = set()
+        for source in sources:
+            source_headers = dict(headers)
+            source_headers["Referer"] = referer
+            if "/aweme/" in source:
+                source_headers["Accept"] = "application/json, text/plain, */*"
+            request = urllib.request.Request(source, headers=source_headers)
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = response.read().decode("utf-8", errors="replace")
+            except (OSError, urllib.error.URLError):
+                continue
+            for candidate in self._extract_douyin_video_urls(body):
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                found.append(candidate)
+                if len(found) >= wanted:
+                    return found
+        return found
+
+    @classmethod
+    def _extract_douyin_video_urls(cls, body: str) -> list[str]:
+        """Extract stable Douyin video IDs from HTML, escaped JSON, or API JSON."""
+        decoded = html.unescape(urllib.parse.unquote(body))
+        # Hydration JSON may escape slashes once or twice.
+        decoded = decoded.replace("\\u002F", "/").replace("\\/", "/")
+        identifiers: list[str] = []
+        identifiers.extend(
+            re.findall(r"(?:https?:)?//(?:www\.)?douyin\.com/video/(\d{12,})", decoded)
+        )
+        identifiers.extend(
+            re.findall(
+                r'["\'](?:aweme_id|group_id|item_id|video_id)["\']\s*:\s*["\'](\d{12,})["\']',
+                decoded,
+            )
+        )
+        found: list[str] = []
+        seen: set[str] = set()
+        for identifier in identifiers:
+            url = cls._normalize_douyin_video_url(
+                f"https://www.douyin.com/video/{identifier}"
+            )
+            if url and url not in seen:
+                seen.add(url)
+                found.append(url)
+        return found
+
+    @staticmethod
+    def _cookie_header_for_domain(cookies_file: Path | None, domain: str) -> str:
+        """Convert matching, unexpired Netscape cookies to an HTTP Cookie header."""
+        if not cookies_file or not cookies_file.is_file():
+            return ""
+        now = int(datetime.now(timezone.utc).timestamp())
+        cookies: dict[str, str] = {}
+        try:
+            lines = cookies_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return ""
+        wanted_domain = domain.lower().lstrip(".")
+        for raw_line in lines:
+            line = raw_line.strip()
+            if line.startswith("#HttpOnly_"):
+                line = line[len("#HttpOnly_") :]
+            elif not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 7:
+                continue
+            cookie_domain = fields[0].lower().lstrip(".")
+            if not (
+                cookie_domain == wanted_domain
+                or cookie_domain.endswith("." + wanted_domain)
+            ):
+                continue
+            try:
+                expires = int(fields[4] or "0")
+            except ValueError:
+                expires = 0
+            if expires and expires <= now:
+                continue
+            name, value = fields[5].strip(), fields[6].strip()
+            if name and value:
+                cookies[name] = value
+        return "; ".join(f"{name}={value}" for name, value in cookies.items())
 
     def _discover_douyin_urls(self, query: str, limit: int) -> list[str]:
         """Find indexed Douyin video URLs without sending a search page to yt-dlp."""
@@ -357,7 +506,7 @@ class DownloaderEngine:
             detail = errors[0] if errors else "Douyin không trả về metadata video."
             raise DownloaderError(
                 "Đã tìm thấy link Douyin nhưng không đọc được video. "
-                "Hãy vào Cài đặt, lấy đăng nhập từ Chrome/Edge rồi thử lại. Chi tiết: "
+                "Hãy vào Cài đặt, làm mới đăng nhập từ trình duyệt rồi thử lại. Chi tiết: "
                 + detail
             )
         return videos
